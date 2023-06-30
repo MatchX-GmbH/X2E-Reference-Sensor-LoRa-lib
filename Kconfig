@@ -1,0 +1,30 @@
+menu "LoRaWAN"
+    config LORAWAN_ADR_ON
+        bool "Adaptive Data Rate (ADR)"
+        default y
+        help
+            Enable Adaptive Data Rate. 
+            You may use this for stationary device.
+    
+    config LORAWAN_DEFAULT_DATARATE
+        int "Default datarate"
+        default 3
+        range 0 5
+        help
+            Enter the default datarate.           
+
+    choice LORAWAN_SUBGHZ_REGION
+        prompt "Region for sub-GHz"
+        default LORAWAN_REGION_EU868
+        help
+            Select the sub-GHz region. It will served by the SX1261 LoRa chip.
+
+        config LORAWAN_REGION_EU868
+            bool "EU868 - For Europe"
+
+        config LORAWAN_REGION_US915
+            bool "US915 - For USA"
+
+    endchoice #LORG_SUBGHZ_REGION
+
+endmenu
