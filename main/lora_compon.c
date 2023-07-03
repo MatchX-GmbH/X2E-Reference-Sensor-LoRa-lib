@@ -73,7 +73,12 @@ static const char *kSubGHzRegionName = "";
 #endif
 
 // Default datarate
+#if defined(CONFIG_LORAWAN_DEFAULT_DATARATE)
+#define LORAWAN_DEFAULT_DATARATE CONFIG_LORAWAN_DEFAULT_DATARATE
+#else
 #define LORAWAN_DEFAULT_DATARATE DR_3
+#endif
+
 #define LORAWAN_HELLO_DATARATE DR_3
 #define LORAWAN_JOIN_DR_MIN DR_0
 #define LORAWAN_JOIN_DR_MAX LORAWAN_DEFAULT_DATARATE
@@ -84,7 +89,11 @@ static const char *kSubGHzRegionName = "";
 
 // LoRaWAN Adaptive Data Rate
 //  remark Please note that when ADR is enabled the end-device should be static
+#if defined(CONFIG_LORAWAN_ADR_ON)
 #define LORAWAN_ADR_ON true
+#else
+#define LORAWAN_ADR_ON false
+#endif
 
 // Retries
 #define NUM_OF_RETRY_TX 2
@@ -752,6 +761,9 @@ void loraTask(void *param) {
         LoRaMacMibSetRequestConfirm(&mibReq);
         if (LORAWAN_ADR_ON) {
           LORA_PRINTLINE("ADR is ON.");
+        }
+        else {
+          LORA_PRINTLINE("ADR is OFF.");
         }
 
 #if defined(REGION_EU868) || defined(REGION_RU864) || defined(REGION_CN779) || defined(REGION_EU433)
