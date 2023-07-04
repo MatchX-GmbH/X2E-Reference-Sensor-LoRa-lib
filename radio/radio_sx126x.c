@@ -590,6 +590,7 @@ void RadioSetModem( RadioModems_t modem )
 void RadioSetChannel( uint32_t freq )
 {
     SX126xSetRfFrequency( freq );
+    LORARADIO_PRINTLINE("SetChannel, freq=%u", freq);
 }
 
 bool RadioIsChannelFree( uint32_t freq, uint32_t rxBandwidth, int16_t rssiThresh, uint32_t maxCarrierSenseTime )
@@ -856,6 +857,8 @@ void RadioSetTxConfig( RadioModems_t modem, int8_t power, uint32_t fdev,
             RadioSetModem( ( SX126x.ModulationParams.PacketType == PACKET_TYPE_GFSK ) ? MODEM_FSK : MODEM_LORA );
             SX126xSetModulationParams( &SX126x.ModulationParams );
             SX126xSetPacketParams( &SX126x.PacketParams );
+
+            LORARADIO_PRINTLINE("TxConfig, SF=%d", SX126x.ModulationParams.Params.LoRa.SpreadingFactor);
             break;
     }
 
@@ -1083,14 +1086,15 @@ void RadioRx( uint32_t timeout )
         TimerStart( &RxTimeoutTimer );
     }
 
-    if( RxContinuous == true )
-    {
-        SX126xSetRx( 0xFFFFFF ); // Rx Continuous
-    }
-    else
-    {
-        SX126xSetRx( RxTimeout << 6 );
-    }
+    SX126xSetRx( 0xFFFFFF ); // Always use Continuous
+    // if( RxContinuous == true )
+    // {
+    //     SX126xSetRx( 0xFFFFFF ); // Rx Continuous
+    // }
+    // else
+    // {
+    //     SX126xSetRx( RxTimeout << 6 );
+    // }
 }
 
 void RadioRxBoosted( uint32_t timeout )

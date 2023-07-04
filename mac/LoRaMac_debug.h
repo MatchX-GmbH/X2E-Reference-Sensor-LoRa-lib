@@ -5,7 +5,11 @@
 
 //==========================================================================
 //==========================================================================
+#if defined(CONFIG_LORAMAC_DEBUG)
 #define LORAMAC_DEBUG 1
+#else
+#define LORAMAC_DEBUG 0
+#endif
 
 #if LORAMAC_DEBUG
 #include <stdint.h>

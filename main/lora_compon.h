@@ -61,13 +61,15 @@ int8_t LoRaComponSendData(const uint8_t *aData, uint16_t aLen);
 bool LoRaComponIsRxReady(void);
 int32_t LoRaComponGetData(uint8_t *aData, uint16_t aDataSize, LoRaRxInfo_t *aInfo);
 
+void LoRaComponSetDatarate(int8_t aValue);
+
 void LoRaComponSetBatteryPercent(float aValue);
 void LoRaComponSetExtPower(void);
 
 bool LoRaComponIsProvisioned(void);
 bool LoRaComponIsJoined(void);
+bool LoRaComponIsSendDone(void);
 bool LoRaComponIsSendSuccess(void);
-bool LoRaComponIsSendFailure(void);
 
 uint32_t LoRaComponGetStatus(void);
 

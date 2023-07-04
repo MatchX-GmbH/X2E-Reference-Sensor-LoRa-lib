@@ -156,6 +156,7 @@ void LoRaBoardInitMcu(void) {
   if (gBoardTimer == NULL) {
     const esp_timer_create_args_t periodic_timer_args = {
         .callback = &PeriodicTimerFunc,
+        .dispatch_method = ESP_TIMER_TASK,
         .name = "periodic",
     };
     if (esp_timer_create(&periodic_timer_args, &gBoardTimer) != ESP_OK) {

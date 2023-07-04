@@ -5,7 +5,11 @@
 
 //==========================================================================
 //==========================================================================
+#if defined(CONFIG_LORARADIO_DEBUG)
 #define LORARADIO_DEBUG 1
+#else
+#define LORARADIO_DEBUG 0
+#endif
 
 #if LORARADIO_DEBUG
 #include <stdint.h>

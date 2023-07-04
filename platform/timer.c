@@ -48,7 +48,7 @@ uint32_t LoRaTickElapsed(uint32_t aTick) {
 
 //==========================================================================
 //==========================================================================
-void TimerInsertTimer(TimerEvent_t *obj) {
+static void TimerInsertTimer(TimerEvent_t *obj) {
   // Find a blank slot
   for (int i = 0; i < MAX_NUM_OF_TIMER; i++) {
     if (gTimerList[i] == NULL) {
@@ -106,7 +106,6 @@ void TimerStart(TimerEvent_t *obj) {
   CRITICAL_SECTION_BEGIN();
 
   if (obj != NULL) {
-    // esp_backtrace_print(6);
     obj->Timestamp = LoRaGetTick();
     obj->IsStarted = true;
     obj->IsNext2Expire = false;
@@ -142,7 +141,6 @@ void TimerIrqHandler(void) {
     if (gTimerList[i] != NULL) {
       if (gTimerList[i]->IsStarted) {
         if (LoRaTickElapsed(gTimerList[i]->Timestamp) >= gTimerList[i]->ReloadValue) {
-          gTimerList[i]->Timestamp = LoRaGetTick();
           gTimerList[i]->IsStarted = false;
           if (gTimerList[i]->Callback == NULL) {
             printf("WARN. TimerIrqHandler missing callback on slot %d.", i);
@@ -157,7 +155,7 @@ void TimerIrqHandler(void) {
 
     //
     if (callback != NULL) {
-      // LORAPLATFORM_PRINTLINE("Timer triggered.");
+      // LORAPLATFORM_PRINTLINE("Timer triggered. %u, %u", gTimerList[i]->Timestamp, LoRaGetTick());
       callback(callback_context);
     }
   }

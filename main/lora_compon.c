@@ -21,8 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "LoRaCompon_debug.h"
 #include "LoRaMac.h"
-#include "LoRa_debug.h"
 #include "board.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -73,19 +73,9 @@ static const char *kSubGHzRegionName = "";
 #endif
 
 // Default datarate
-#if defined(CONFIG_LORAWAN_DEFAULT_DATARATE)
-#define LORAWAN_DEFAULT_DATARATE CONFIG_LORAWAN_DEFAULT_DATARATE
-#else
-#define LORAWAN_DEFAULT_DATARATE DR_3
-#endif
-
 #define LORAWAN_HELLO_DATARATE DR_3
 #define LORAWAN_JOIN_DR_MIN DR_0
-#define LORAWAN_JOIN_DR_MAX LORAWAN_DEFAULT_DATARATE
-
-// LoRaWAN confirmed messages
-#define LORAWAN_CONFIRMED_MSG_ON true
-#define MAX_NUM_OF_UNCONFIRMED 5
+#define LORAWAN_JOIN_DR_MAX CONFIG_LORAWAN_DEFAULT_DATARATE
 
 // LoRaWAN Adaptive Data Rate
 //  remark Please note that when ADR is enabled the end-device should be static
@@ -97,7 +87,19 @@ static const char *kSubGHzRegionName = "";
 
 // Retries
 #define NUM_OF_RETRY_TX 2
+
+// Link setting
+#if defined(CONFIG_MAX_LINK_FAIL_COUNT)
+#define MAX_LINK_FAIL_COUNT CONFIG_MAX_LINK_FAIL_COUNT
+#else
 #define MAX_LINK_FAIL_COUNT 8
+#endif
+
+#if defined(CONFIG_INTERVAL_UNCONFIRMED_TO_CONFIRMED)
+#define INTERVAL_UNCONFIRMED_TO_CONFIRMED CONFIG_INTERVAL_UNCONFIRMED_TO_CONFIRMED
+#else
+#define INTERVAL_UNCONFIRMED_TO_CONFIRMED 4
+#endif
 
 // ms
 #define TIME_JOIN_INTERVAL_MIN 60000
@@ -131,6 +133,7 @@ typedef enum {
   S_LORALINK_SEND,
   S_LORALINK_SEND_MAC,
   S_LORALINK_SEND_WAITING,
+  S_LORALINK_SEND_END,
   S_LORALINK_WAITING,
   S_LORALINK_SLEEP,
   S_LORALINK_WAKEUP,
@@ -169,10 +172,14 @@ typedef struct TLoraAppData {
 //
 static uint8_t gTxBuf[LORA_MAX_PAYLOAD_LEN];
 static LoraAppData_t gTxData = {gTxBuf, 1, 10, 0};
+static bool gTxConfirmed;
+static uint16_t gUnconfigmedCount;
+
 static uint8_t gRxBuf[LORA_MAX_PAYLOAD_LEN];
 static LoraAppData_t gRxData = {gRxBuf, 0, 0, 0};
+
 static bool gSendingBlankFrame;
-static int8_t gUnconfirmedCount;
+static int8_t gCurrentDateRate = CONFIG_LORAWAN_DEFAULT_DATARATE;
 
 static uint32_t gAckIndex;
 static uint8_t gJoinRetryTimes;
@@ -262,27 +269,11 @@ static const char *getMacEventStatusString(uint8_t aStatus) {
 //==========================================================================
 static uint8_t GetBatteryLevel(void) { return gBatteryValue; }
 
-void LoRaComponSetBatteryPercent(float aValue) {
-  if (isnan(aValue)) {
-    gBatteryValue = BAT_LEVEL_NO_MEASURE;
-  } else if (aValue >= 100) {
-    gBatteryValue = BAT_LEVEL_FULL;
-  } else if (aValue <= 0) {
-    gBatteryValue = BAT_LEVEL_EMPTY;
-  } else {
-    aValue = (aValue / 100) * (BAT_LEVEL_FULL - BAT_LEVEL_EMPTY);
-    aValue += 0.5;
-    gBatteryValue = (uint8_t)aValue;
-  }
-}
-
-void LoRaComponSetExtPower(void) { gBatteryValue = BAT_LEVEL_EXT_SRC; }
-
 //==========================================================================
 // ProvisioningHello
 //==========================================================================
 static void ProvisioningHello(void) {
-  LORA_PRINTLINE("ProvisioningHello()");
+  LORACOMPON_PRINTLINE("ProvisioningHello()");
 
   // //
   // LoRaMacStatus_t status;
@@ -299,14 +290,14 @@ static void ProvisioningHello(void) {
 
   //   // Starts the Proprietary procedure
   //   status = LoRaMacMlmeRequest(&mlmeReq);
-  //   LORA_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
-  //   LORA_PRINTLINE("  STATUS: %s", getMacStatusString(status));
+  //   LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
+  //   LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
 
   //   if (status == LORAMAC_STATUS_OK) {
-  //     LORA_PRINTLINE("  SUCCESS");
+  //     LORACOMPON_PRINTLINE("  SUCCESS");
   //   } else {
   //     if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
-  //       LORA_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
+  //       LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
   //     }
   //   }
   // }
@@ -316,7 +307,7 @@ static void ProvisioningHello(void) {
 // ProvisioningAuth
 //==========================================================================
 static void ProvisioningAuth(void) {
-  LORA_PRINTLINE("ProvisioningAuth()");
+  LORACOMPON_PRINTLINE("ProvisioningAuth()");
 
   //
   // LoRaMacStatus_t status;
@@ -332,14 +323,14 @@ static void ProvisioningAuth(void) {
   // // Starts the Proprietary procedure
   // status = LoRaMacMlmeRequest(&mlmeReq);
 
-  // LORA_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
-  // LORA_PRINTLINE("  STATUS: %s", getMacStatusString(status));
+  // LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
+  // LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
 
   // if (status == LORAMAC_STATUS_OK) {
-  //   LORA_PRINTLINE("  SUCCESS");
+  //   LORACOMPON_PRINTLINE("  SUCCESS");
   // } else {
   //   if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
-  //     LORA_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
+  //     LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
   //   }
   // }
 }
@@ -354,22 +345,22 @@ static int8_t sendBlankFrame(void) {
 
   if (!LORAWAN_ADR_ON) {
     mibReq.Type = MIB_CHANNELS_DATARATE;
-    mibReq.Param.ChannelsDatarate = LORAWAN_DEFAULT_DATARATE;
+    mibReq.Param.ChannelsDatarate = gCurrentDateRate;
     LoRaMacMibSetRequestConfirm(&mibReq);
   }
 
-  if (LORAWAN_CONFIRMED_MSG_ON) {
+  if (gTxConfirmed) {
     mcpsReq.Type = MCPS_CONFIRMED;
     mcpsReq.Req.Confirmed.fPort = gTxData.port;
     mcpsReq.Req.Confirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Confirmed.fBufferSize = 0;
-    mcpsReq.Req.Confirmed.Datarate = LORAWAN_DEFAULT_DATARATE;
+    mcpsReq.Req.Confirmed.Datarate = gCurrentDateRate;
   } else {
     mcpsReq.Type = MCPS_UNCONFIRMED;
     mcpsReq.Req.Unconfirmed.fPort = gTxData.port;
     mcpsReq.Req.Unconfirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Unconfirmed.fBufferSize = 0;
-    mcpsReq.Req.Unconfirmed.Datarate = LORAWAN_DEFAULT_DATARATE;
+    mcpsReq.Req.Unconfirmed.Datarate = gCurrentDateRate;
   }
 
   gSendingBlankFrame = true;
@@ -377,7 +368,7 @@ static int8_t sendBlankFrame(void) {
   if (ret_mac == LORAMAC_STATUS_OK) {
     return 0;
   } else {
-    LORA_PRINTLINE("LoRaMacMcpsRequest() failed, %s", getMacStatusString(ret_mac));
+    LORACOMPON_PRINTLINE("LoRaMacMcpsRequest() failed, %s", getMacStatusString(ret_mac));
     return -1;
   }
 }
@@ -394,19 +385,19 @@ static int8_t sendFrame(void) {
   // Set Datarate
   if (!LORAWAN_ADR_ON) {
     mibReq.Type = MIB_CHANNELS_DATARATE;
-    mibReq.Param.ChannelsDatarate = LORAWAN_DEFAULT_DATARATE;
+    mibReq.Param.ChannelsDatarate = gCurrentDateRate;
     LoRaMacMibSetRequestConfirm(&mibReq);
   }
 
   // Check frame size
   ret_mac = LoRaMacQueryTxPossible(gTxData.dataSize, &txInfo);
   if (ret_mac != LORAMAC_STATUS_OK) {
-    // LORA_PRINTLINE("CurrentPossiblePayloadSize=%d", txInfo.CurrentPossiblePayloadSize);
-    // LORA_PRINTLINE("MaxPossibleApplicationDataSize=%d", txInfo.MaxPossibleApplicationDataSize);
+    // LORACOMPON_PRINTLINE("CurrentPossiblePayloadSize=%d", txInfo.CurrentPossiblePayloadSize);
+    // LORACOMPON_PRINTLINE("MaxPossibleApplicationDataSize=%d", txInfo.MaxPossibleApplicationDataSize);
     if (ret_mac == LORAMAC_STATUS_LENGTH_ERROR) {
       printf("ERROR. Payload is too large at current datarate. Max is %d.\n", txInfo.CurrentPossiblePayloadSize);
       if (LORAWAN_ADR_ON) {
-        LORA_PRINTLINE("ADR is on. Sending a blank frame.");
+        LORACOMPON_PRINTLINE("ADR is on. Sending a blank frame.");
         sendBlankFrame();
         return -1;
       } else {
@@ -419,13 +410,13 @@ static int8_t sendFrame(void) {
     }
   }
 
-  if ((LORAWAN_CONFIRMED_MSG_ON) || (gUnconfirmedCount >= MAX_NUM_OF_UNCONFIRMED)) {
+  if (gTxConfirmed) {
     mcpsReq.Type = MCPS_CONFIRMED;
     mcpsReq.Req.Confirmed.fPort = gTxData.port;
     mcpsReq.Req.Confirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Confirmed.fBufferSize = gTxData.dataSize;
     //    mcpsReq.Req.Confirmed.NbTrials = g_data_send_nbtrials ? g_data_send_nbtrials : gMacConfig->nbtrials.conf + 1;
-    mcpsReq.Req.Confirmed.Datarate = LORAWAN_DEFAULT_DATARATE;
+    mcpsReq.Req.Confirmed.Datarate = gCurrentDateRate;
   } else {
     // MibRequestConfirm_t mibReq;
     // mibReq.Type = MIB_CHANNELS_NB_TRANS;
@@ -436,7 +427,7 @@ static int8_t sendFrame(void) {
     mcpsReq.Req.Unconfirmed.fPort = gTxData.port;
     mcpsReq.Req.Unconfirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Unconfirmed.fBufferSize = gTxData.dataSize;
-    mcpsReq.Req.Unconfirmed.Datarate = LORAWAN_DEFAULT_DATARATE;
+    mcpsReq.Req.Unconfirmed.Datarate = gCurrentDateRate;
   }
 
   //
@@ -445,7 +436,7 @@ static int8_t sendFrame(void) {
   if (ret_mac == LORAMAC_STATUS_OK) {
     return 0;
   } else {
-    LORA_PRINTLINE("LoRaMacMcpsRequest() failed, %s", getMacStatusString(ret_mac));
+    LORACOMPON_PRINTLINE("LoRaMacMcpsRequest() failed, %s", getMacStatusString(ret_mac));
     return -1;
   }
 }
@@ -458,15 +449,12 @@ static void McpsConfirm(McpsConfirm_t *mcpsConfirm) {
     gTxData.dataSize = 0;
   }
   if (mcpsConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
-    LORA_PRINTLINE("McpsConfirm() OK");
-    if (!LORAWAN_CONFIRMED_MSG_ON) {
+    LORACOMPON_PRINTLINE("McpsConfirm() OK");
+    if (!gTxConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
       gLinkFailCount = 0;
       FreeMutex();
-      if (gUnconfirmedCount < MAX_NUM_OF_UNCONFIRMED) {
-        gUnconfirmedCount++;
-      }
     }
   } else {
     printf("ERROR. McpsConfirm() failed. %s\n", getMacEventStatusString(mcpsConfirm->Status));
@@ -495,7 +483,7 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
   // Check Rssi
   // Check Snr
   // Check RxSlot
-  LORA_PRINTLINE("rx frame: rssi=%d, snr=%d, dr=%d", mcpsIndication->Rssi, mcpsIndication->Snr, mcpsIndication->RxDatarate);
+  LORACOMPON_PRINTLINE("rx frame: rssi=%d, snr=%d, dr=%d", mcpsIndication->Rssi, mcpsIndication->Snr, mcpsIndication->RxDatarate);
   gLastRxRssi = mcpsIndication->Rssi;
   gLastRxDatarate = mcpsIndication->RxDatarate;
   if (mcpsIndication->RxData == true) {
@@ -506,21 +494,19 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
         gRxData.port = mcpsIndication->Port;
         gRxData.dataSize = mcpsIndication->BufferSize;
         memcpy1(gRxData.data, mcpsIndication->Buffer, gRxData.dataSize);
-        LORA_PRINTLINE("Rxed %d bytes.", gRxData.dataSize);
+        LORACOMPON_PRINTLINE("Rxed %d bytes.", gRxData.dataSize);
         break;
       }
     }
   }
   if (mcpsIndication->AckReceived) {
     // ACK
-    LORA_PRINTLINE("rx, ACK, index %u", (unsigned int)gAckIndex++);
-    if (LORAWAN_CONFIRMED_MSG_ON) {
+    LORACOMPON_PRINTLINE("rx, ACK, index %u", (unsigned int)gAckIndex++);
+    if (gTxConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
       gLinkFailCount = 0;
       FreeMutex();
-    } else {
-      gUnconfirmedCount = 0;
     }
   }
 
@@ -531,8 +517,8 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
 // MLME-Confirm event function
 //==========================================================================
 static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
-  LORA_PRINTLINE("MLME-Confirm");
-  LORA_PRINTLINE("  STATUS: %s", getMacEventStatusString(mlmeConfirm->Status));
+  LORACOMPON_PRINTLINE("MLME-Confirm");
+  LORACOMPON_PRINTLINE("  STATUS: %s", getMacEventStatusString(mlmeConfirm->Status));
   switch (mlmeConfirm->MlmeRequest) {
     case MLME_JOIN: {
       if (mlmeConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
@@ -542,7 +528,7 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
         gLinkStatus |= BIT_LORASTATUS_JOIN_PASS;
         FreeMutex();
       } else {
-        LORA_PRINTLINE("Join failed.");
+        LORACOMPON_PRINTLINE("Join failed.");
         TakeMutex();
         gLinkStatus |= BIT_LORASTATUS_JOIN_FAIL;
         FreeMutex();
@@ -553,41 +539,41 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
     // case MLME_PROPRIETARY: {
     //   if (mlmeConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
     //     MibRequestConfirm_t mibGet;
-    //     LORA_PRINTLINE("  PROPRIETARY RXED");
-    //     LORA_PRINTLINE("  RSSI: %d", mlmeConfirm->ProprietaryRssi);
-    //     LORA_PRINTLINE("  MIC=%08X (%d)", (unsigned int)mlmeConfirm->ProprietaryMic, mlmeConfirm->ProprietaryMicCorrect);
-    //     LORA_PRINTLINE("  PayloadLen=%d", mlmeConfirm->ProprietaryPayloadLen);
+    //     LORACOMPON_PRINTLINE("  PROPRIETARY RXED");
+    //     LORACOMPON_PRINTLINE("  RSSI: %d", mlmeConfirm->ProprietaryRssi);
+    //     LORACOMPON_PRINTLINE("  MIC=%08X (%d)", (unsigned int)mlmeConfirm->ProprietaryMic, mlmeConfirm->ProprietaryMicCorrect);
+    //     LORACOMPON_PRINTLINE("  PayloadLen=%d", mlmeConfirm->ProprietaryPayloadLen);
     //     if (mlmeConfirm->ProprietaryPayloadLen > 0) {
-    //       LORA_HEX2STRING("Payload:", mlmeConfirm->ProprietaryPayload, mlmeConfirm->ProprietaryPayloadLen);
+    //       LORACOMPON_HEX2STRING("Payload:", mlmeConfirm->ProprietaryPayload, mlmeConfirm->ProprietaryPayloadLen);
     //     }
     //     mibGet.Type = MIB_CHANNELS_DATARATE;
     //     LoRaMacMibGetRequestConfirm(&mibGet);
-    //     LORA_PRINTLINE("  DATA RATE: DR_%d", mibGet.Param.ChannelsDatarate);
+    //     LORACOMPON_PRINTLINE("  DATA RATE: DR_%d", mibGet.Param.ChannelsDatarate);
 
     //     // Check resp
     //     const uint8_t *resp = mlmeConfirm->ProprietaryPayload;
     //     if (!mlmeConfirm->ProprietaryMicCorrect) {
-    //       LORA_PRINTLINE("  Wrong MIC, response dropped.");
+    //       LORACOMPON_PRINTLINE("  Wrong MIC, response dropped.");
     //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_HELLO) && (resp[0] == DOWN_RESP_HELLO)) {
     //       // Hello Response
     //       if (DevProvisionHelloResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
-    //         LORA_PRINTLINE("  Hello response got.");
+    //         LORACOMPON_PRINTLINE("  Hello response got.");
     //         gProvisionStatus |= BIT_PROV_HELLO_OK;
     //       }
     //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_ACCEPT) && (resp[0] == DOWN_RESP_AUTH_ACCEPT)) {
     //       // Auth Response
     //       if (DevProvisionAuthResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
-    //         LORA_PRINTLINE("  Auth accepted.");
+    //         LORACOMPON_PRINTLINE("  Auth accepted.");
     //         gProvisionStatus |= BIT_PROV_AUTH_OK;
     //       }
     //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_REJECT) && (resp[0] == DOWN_RESP_AUTH_REJECT)) {
     //       if (DevProvisionCmpDevEui(&resp[1]) != 0) {
     //         // Mismatch devEUI
     //       } else {
-    //         LORA_PRINTLINE("  Auth rejected.");
+    //         LORACOMPON_PRINTLINE("  Auth rejected.");
     //       }
     //     } else {
-    //       LORA_PRINTLINE("Unknown proprietary frame.");
+    //       LORACOMPON_PRINTLINE("Unknown proprietary frame.");
     //     }
     //   }
     //   break;
@@ -614,7 +600,7 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
 // MLME-Indication event function
 //==========================================================================
 static void MlmeIndication(MlmeIndication_t *mlmeIndication) {
-  LORA_PRINTLINE("MLME-Indication");
+  LORACOMPON_PRINTLINE("MLME-Indication");
   switch (mlmeIndication->MlmeIndication) {
     case MLME_BEACON_LOST: {
       break;
@@ -640,11 +626,11 @@ static void InitOtaa(void) {
   MibRequestConfirm_t mibReq;
 
   mibReq.Type = MIB_CHANNELS_DEFAULT_DATARATE;
-  mibReq.Param.ChannelsDefaultDatarate = LORAWAN_DEFAULT_DATARATE;
+  mibReq.Param.ChannelsDefaultDatarate = CONFIG_LORAWAN_DEFAULT_DATARATE;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_CHANNELS_DATARATE;
-  mibReq.Param.ChannelsDatarate = LORAWAN_DEFAULT_DATARATE;
+  mibReq.Param.ChannelsDatarate = CONFIG_LORAWAN_DEFAULT_DATARATE;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   // Setup Dev EUI
@@ -664,11 +650,11 @@ static void InitOtaa(void) {
   mibReq.Param.NwkKey = gLoRaSetting.appKey;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
-  LORA_PRINTLINE("InitOtaa()");
-  LORA_HEX2STRING("DevEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
-  LORA_HEX2STRING("JoinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
-  LORA_HEX2STRING("NwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
-  LORA_HEX2STRING("AppKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
+  LORACOMPON_PRINTLINE("InitOtaa()");
+  LORACOMPON_HEX2STRING("DevEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
+  LORACOMPON_HEX2STRING("JoinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
+  LORACOMPON_HEX2STRING("NwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
+  LORACOMPON_HEX2STRING("AppKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
 }
 
 //==========================================================================
@@ -677,9 +663,9 @@ static void InitOtaa(void) {
 // void CalVerifyCode(uint8_t *aDest, uint32_t aDestSize, const char *aProvisionId, const uint8_t *aNonce);
 
 // static void InitDevProvision(void) {
-//   LORA_PRINTLINE("InitDevProvision()");
-//   LORA_PRINTLINE("PID=%s", gSystemSetting.provisionId);
-//   LORA_HEX2STRING("Hash=", gSystemSetting.provisionIdHash, sizeof(gSystemSetting.provisionIdHash));
+//   LORACOMPON_PRINTLINE("InitDevProvision()");
+//   LORACOMPON_PRINTLINE("PID=%s", gSystemSetting.provisionId);
+//   LORACOMPON_HEX2STRING("Hash=", gSystemSetting.provisionIdHash, sizeof(gSystemSetting.provisionIdHash));
 
 //   DevProvisionInit(gSystemSetting.provisionId, gSystemSetting.provisionIdHash);
 
@@ -702,6 +688,8 @@ void loraTask(void *param) {
   gJoinInterval = 0;
   gBatteryValue = BAT_LEVEL_NO_MEASURE;
   gLoRaTaskAbort = false;
+  gTxConfirmed = true;
+  gUnconfigmedCount = 0;
 
   //
   // ExtPowerInit();
@@ -732,7 +720,7 @@ void loraTask(void *param) {
       case S_LORALINK_INIT: {
         MibRequestConfirm_t mibReq;
 
-        // LORA_PRINTLINE("S_LORALINK_INIT");
+        // LORACOMPON_PRINTLINE("S_LORALINK_INIT");
         LoRaMacDeInitialization();
 
         gLoRaMacPrimitives.MacMcpsConfirm = McpsConfirm;
@@ -760,10 +748,9 @@ void loraTask(void *param) {
         mibReq.Param.AdrEnable = LORAWAN_ADR_ON;
         LoRaMacMibSetRequestConfirm(&mibReq);
         if (LORAWAN_ADR_ON) {
-          LORA_PRINTLINE("ADR is ON.");
-        }
-        else {
-          LORA_PRINTLINE("ADR is OFF.");
+          LORACOMPON_PRINTLINE("ADR is ON.");
+        } else {
+          LORACOMPON_PRINTLINE("ADR is OFF.");
         }
 
 #if defined(REGION_EU868) || defined(REGION_RU864) || defined(REGION_CN779) || defined(REGION_EU433)
@@ -772,7 +759,7 @@ void loraTask(void *param) {
 
         // Set rx time error range
         mibReq.Type = MIB_SYSTEM_MAX_RX_ERROR;
-        mibReq.Param.SystemMaxRxError = 60;  // Increase this could make the RX window open earlier.
+        mibReq.Param.SystemMaxRxError = 50;  // Increase this could make the RX window open earlier.
                                              // Warning: Since there is a limitation on the RX widnow,
                                              //          a too large value will cause the window shifted
                                              //          to early and missed the signal.
@@ -791,14 +778,15 @@ void loraTask(void *param) {
         gTxData.dataSize = 0;
         gRxData.dataSize = 0;
         gSendingBlankFrame = false;
-        gUnconfirmedCount = MAX_NUM_OF_UNCONFIRMED;
+        gTxConfirmed = true;
+        gUnconfigmedCount = 0;
         TakeMutex();
         gLinkStatus = 0;
         gLinkFailCount = 0;
         FreeMutex();
 #if mx_configUSE_DEVICE_PROVISIONING
         if (gLoRaSetting.provisionDone) {
-          LORA_PRINTLINE("Device is provisioned.");
+          LORACOMPON_PRINTLINE("Device is provisioned.");
           gLoraLinkState = S_LORALINK_JOIN;
         } else {
           gLinkStatus |= BIT_LORASTATUS_DEV_PROV;
@@ -847,7 +835,7 @@ void loraTask(void *param) {
         //   gJoinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
         //   gTickLoraLink = LoRaGetTick();
         // } else if ((gProvisionStatus & BIT_PROV_AUTH_OK) != 0) {
-        //   LORA_PRINTLINE("  Provisioning the device.");
+        //   LORACOMPON_PRINTLINE("  Provisioning the device.");
         //   memcpy(gLoRaSetting.devEui, DevProvisioningGetAssignedDevEui(), LORA_EUI_LENGTH);
         //   memcpy(gLoRaSetting.joinEui, DevProvisioningGetAssignedJoinEui(), LORA_EUI_LENGTH);
         //   memcpy(gLoRaSetting.nwkKey, DevProvisioningGetAssignedNwkKey(), LORA_KEY_LENGTH);
@@ -855,10 +843,10 @@ void loraTask(void *param) {
         //   gLoRaSetting.provisionDone = true;
         //   AppSettingSave();
 
-        //   LORA_HEX2STRING("  devEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
-        //   LORA_HEX2STRING("  joinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
-        //   LORA_HEX2STRING("  appKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
-        //   LORA_HEX2STRING("  nwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
+        //   LORACOMPON_HEX2STRING("  devEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
+        //   LORACOMPON_HEX2STRING("  joinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
+        //   LORACOMPON_HEX2STRING("  appKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
+        //   LORACOMPON_HEX2STRING("  nwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
 
         //   gLoraLinkState = S_LORALINK_INIT;
         // }
@@ -873,10 +861,10 @@ void loraTask(void *param) {
         mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
         mlmeReq.Req.Join.NetworkActivation = ACTIVATION_TYPE_OTAA;
 
-        LORA_PRINTLINE("Start to Join, dr=%d", mlmeReq.Req.Join.Datarate);
+        LORACOMPON_PRINTLINE("Start to Join, dr=%d", mlmeReq.Req.Join.Datarate);
         int ret_mac = LoRaMacMlmeRequest(&mlmeReq);
         if (ret_mac != LORAMAC_STATUS_OK) {
-          LORA_PRINTLINE("LoRaMacMlmeRequest() failed, %s", getMacStatusString(ret_mac));
+          LORACOMPON_PRINTLINE("LoRaMacMlmeRequest() failed, %s", getMacStatusString(ret_mac));
         }
 
         gLoraLinkState = S_LORALINK_JOIN_WAIT;
@@ -898,7 +886,7 @@ void loraTask(void *param) {
       }
 
       case S_LORALINK_JOINED: {
-        LORA_PRINTLINE("Joined");
+        LORACOMPON_PRINTLINE("Joined");
         gLoraLinkState = S_LORALINK_WAITING;
         gTickLoraLink = LoRaGetTick();
         break;
@@ -907,11 +895,11 @@ void loraTask(void *param) {
       case S_LORALINK_SEND: {
         if (sendFrame() < 0) {
           if (gTxData.retry > 0) {
-            LORA_PRINTLINE("TX failed. retry=%d", gTxData.retry);
+            LORACOMPON_PRINTLINE("TX failed. retry=%d", gTxData.retry);
             gTxData.retry--;
           } else {
             // TX dropped
-            LORA_PRINTLINE("TX dropped.");
+            LORACOMPON_PRINTLINE("TX dropped.");
             gTxData.dataSize = 0;
             TakeMutex();
             gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
@@ -939,8 +927,7 @@ void loraTask(void *param) {
         uint32_t status = gLinkStatus;
         FreeMutex();
         if (((status & BIT_LORASTATUS_SEND_FAIL) != 0) || ((status & BIT_LORASTATUS_SEND_PASS) != 0)) {
-          gLoraLinkState = S_LORALINK_WAITING;
-          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_SEND_END;
         } else if (LoRaTickElapsed(gTickLoraLink) >= TIMEOUT_SEND_WAITING) {
           printf("ERROR. SEND_WAITING timeout.\n");
           gTxData.dataSize = 0;
@@ -948,11 +935,22 @@ void loraTask(void *param) {
           gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
           gLinkFailCount++;
           FreeMutex();
-          gLoraLinkState = S_LORALINK_WAITING;
-          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_SEND_END;
         }
         break;
       }
+
+      case S_LORALINK_SEND_END:
+        gUnconfigmedCount++;
+        if (gUnconfigmedCount >= INTERVAL_UNCONFIRMED_TO_CONFIRMED) {
+          gUnconfigmedCount = 0;
+          gTxConfirmed = true;
+        } else {
+          gTxConfirmed = false;
+        }
+        gTickLoraLink = LoRaGetTick();
+        gLoraLinkState = S_LORALINK_WAITING;
+        break;
 
       case S_LORALINK_WAITING: {
         TakeMutex();
@@ -1147,7 +1145,7 @@ void LoRaComponSleepEnter(void) {
 // Call after exit of sleep
 //==========================================================================
 void LoRaComponSleepExit(void) {
-  // LORA_PRINTLINE("LoRaComponSleepExit()");
+  // LORACOMPON_PRINTLINE("LoRaComponSleepExit()");
   // ExtPowerInit();
   // ExtPowerEnable(true);
   // BoardInitMcu();
@@ -1170,10 +1168,10 @@ bool LoRaComponIsTxReady(void) {
   uint32_t status = gLinkStatus;
   FreeMutex();
   if ((status & BIT_LORASTATUS_JOIN_PASS) == 0) {
-    LORA_PRINTLINE("Not join");
+    LORACOMPON_PRINTLINE("Not join");
     return false;
   } else if (gTxData.dataSize != 0) {
-    LORA_PRINTLINE("Last TX in progress");
+    LORACOMPON_PRINTLINE("Last TX in progress");
     return false;
   } else {
     return true;
@@ -1187,7 +1185,7 @@ int8_t LoRaComponSendData(const uint8_t *aData, uint16_t aLen) {
   // MibRequestConfirm_t mibReq;
   // mibReq.Type = MIB_CHANNELS_MASK;
   // LoRaMacMibGetRequestConfirm(&mibReq);
-  // LORA_PRINTLINE("  Mask: %04X %04X %04X %04X %04X %04X", mibReq.Param.ChannelsDefaultMask[0],
+  // LORACOMPON_PRINTLINE("  Mask: %04X %04X %04X %04X %04X %04X", mibReq.Param.ChannelsDefaultMask[0],
   //                     mibReq.Param.ChannelsDefaultMask[1], mibReq.Param.ChannelsDefaultMask[2],
   //                     mibReq.Param.ChannelsDefaultMask[3], mibReq.Param.ChannelsDefaultMask[4],
   //                     mibReq.Param.ChannelsDefaultMask[5]);
@@ -1218,7 +1216,7 @@ bool LoRaComponIsRxReady(void) {
   uint32_t status = gLinkStatus;
   FreeMutex();
   if ((status & BIT_LORASTATUS_JOIN_PASS) == 0) {
-    LORA_PRINTLINE("Not join");
+    LORACOMPON_PRINTLINE("Not join");
     return false;
   } else if (gRxData.dataSize == 0) {
     return false;
@@ -1253,6 +1251,34 @@ int32_t LoRaComponGetData(uint8_t *aData, uint16_t aDataSize, LoRaRxInfo_t *aInf
 }
 
 //==========================================================================
+// Set datarate
+//==========================================================================
+void LoRaComponSetDatarate(int8_t aValue) {
+  TakeMutex();
+  gCurrentDateRate = aValue;
+  FreeMutex();
+}
+
+//==========================================================================
+// Set battery info
+//==========================================================================
+void LoRaComponSetBatteryPercent(float aValue) {
+  if (isnan(aValue)) {
+    gBatteryValue = BAT_LEVEL_NO_MEASURE;
+  } else if (aValue >= 100) {
+    gBatteryValue = BAT_LEVEL_FULL;
+  } else if (aValue <= 0) {
+    gBatteryValue = BAT_LEVEL_EMPTY;
+  } else {
+    aValue = (aValue / 100) * (BAT_LEVEL_FULL - BAT_LEVEL_EMPTY);
+    aValue += 0.5;
+    gBatteryValue = (uint8_t)aValue;
+  }
+}
+
+void LoRaComponSetExtPower(void) { gBatteryValue = BAT_LEVEL_EXT_SRC; }
+
+//==========================================================================
 // Check status
 //==========================================================================
 bool LoRaComponIsProvisioned(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_DEV_PROV) != 0); }
@@ -1261,7 +1287,14 @@ bool LoRaComponIsJoined(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_
 
 bool LoRaComponIsSendSuccess(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_SEND_PASS) != 0); }
 
-bool LoRaComponIsSendFailure(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_SEND_FAIL) != 0); }
+bool LoRaComponIsSendDone(void) {
+  uint32_t status = LoRaComponGetStatus();
+  if (((status & BIT_LORASTATUS_SEND_PASS) == 0) && ((status & BIT_LORASTATUS_SEND_FAIL) == 0)) {
+    return false;
+  } else {
+    return true;
+  }
+}
 
 //==========================================================================
 // Get Raw Status

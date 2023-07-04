@@ -11,7 +11,23 @@ menu "LoRaWAN"
         default 3
         range 0 5
         help
-            Enter the default datarate.           
+            Enter the default datarate.
+
+    config MAX_LINK_FAIL_COUNT
+        int "Max number of consecutive fail"
+        default 8
+        range 1 99
+        help
+            When the maximum number of consecutive fail reach,
+            the LoRa will start over and try to JOIN again.
+
+    config INTERVAL_UNCONFIRMED_TO_CONFIRMED
+        int "Number of unconfirmed between confirmed frames"
+        default 0
+        range 0 99
+        help
+            Set the number of unconfirmed frames between confirmed frames.
+            A 0 means always sending confirmed frames.
 
     choice LORAWAN_SUBGHZ_REGION
         prompt "Region for sub-GHz"
@@ -26,5 +42,21 @@ menu "LoRaWAN"
             bool "US915 - For USA"
 
     endchoice #LORG_SUBGHZ_REGION
+
+    config LORACOMPON_DEBUG
+        bool "Show component debug message"
+        default n
+
+    config LORAMAC_DEBUG
+        bool "Show LoRa MAC debug message"
+        default n
+
+    config LORARADIO_DEBUG
+        bool "Show Radio debug message"
+        default n
+
+    config LORAPLATFORM_DEBUG
+        bool "Show Platform debug message"
+        default n
 
 endmenu

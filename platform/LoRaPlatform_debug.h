@@ -5,7 +5,11 @@
 
 //==========================================================================
 //==========================================================================
+#if defined(CONFIG_LORAPLATFORM_DEBUG)
+#define LORAPLATFORM_DEBUG 1
+#else
 #define LORAPLATFORM_DEBUG 0
+#endif
 
 #if LORAPLATFORM_DEBUG
 #include <stdint.h>

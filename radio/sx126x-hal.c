@@ -61,7 +61,7 @@ void SX126xIoInit(void) {
     spi_device_interface_config_t sx1261_cfg;
     memset(&sx1261_cfg, 0, sizeof(sx1261_cfg));
     sx1261_cfg.mode = 0;  // SPI mode 0
-    sx1261_cfg.clock_speed_hz = SPI_MASTER_FREQ_10M;
+    sx1261_cfg.clock_speed_hz = SPI_MASTER_FREQ_13M;
     sx1261_cfg.spics_io_num = SX1261_SS;
     sx1261_cfg.flags = 0;
     sx1261_cfg.queue_size = 20;
@@ -121,11 +121,11 @@ void SX126xReset(void) {
 //==========================================================================
 int8_t SX126xWaitOnBusy(void) {
   // Timeout at about 1s
-  for (uint32_t timeout = 100; timeout > 0; timeout--) {
+  for (uint32_t timeout = 1000; timeout > 0; timeout--) {
     if (gpio_get_level(SX1261_BUSY) == 0) {
       return 0;
     }
-    DelayMs(10);
+    DelayMs(1);
   }
   gChipError = true;
   printf("ERROR. SX126xWaitOnBusy Timeout.\n");

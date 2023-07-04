@@ -1,34 +1,38 @@
 //==========================================================================
 //==========================================================================
-#ifndef INC_LORARADIO_DEBUG_H
-#define INC_LORARADIO_DEBUG_H
+#ifndef INC_LORACOMPON_DEBUG_H
+#define INC_LORACOMPON_DEBUG_H
 
 //==========================================================================
 //==========================================================================
-#define LORA_DEBUG 1
+#if defined(CONFIG_LORACOMPON_DEBUG)
+#define LORACOMPON_DEBUG 1
+#else
+#define LORACOMPON_DEBUG 0
+#endif
 
-#if LORA_DEBUG
+#if LORACOMPON_DEBUG
 #include <stdint.h>
 #include <stdio.h>
 
-void LoraDebugPrintLine(const char *szFormat, ...);
-void LoraDebugHex2String(const char *aPrefix, const uint8_t *aSrc, int aLen);
+void LoraComponDebugPrintLine(const char *szFormat, ...);
+void LoraComponDebugHex2String(const char *aPrefix, const uint8_t *aSrc, int aLen);
 
-#define LORA_PRINTLINE(x...) LoraDebugPrintLine(x)
-#define LORA_HEX2STRING(x, y, z) LoraDebugHex2String(x, y, z)
+#define LORACOMPON_PRINTLINE(x...) LoraComponDebugPrintLine(x)
+#define LORACOMPON_HEX2STRING(x, y, z) LoraComponDebugHex2String(x, y, z)
 
-#else  // LORA_DEBUG
+#else  // LORACOMPON_DEBUG
 
-#define LORARADIO_PRINTLINE(...) \
+#define LORACOMPON_PRINTLINE(...) \
   {}
-#define LORARADIO_HEX2STRING(...) \
+#define LORACOMPON_HEX2STRING(...) \
   {}
 
-#endif  // LORA_DEBUG
+#endif  // LORACOMPON_DEBUG
 
 //==========================================================================
 //==========================================================================
 
 //==========================================================================
 //==========================================================================
-#endif
+#endif // INC_LORACOMPON_DEBUG_H

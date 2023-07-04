@@ -35,11 +35,11 @@ extern DioIrqHandler* gSx1280DioIrqHandler;
 //==========================================================================
 void SX1280HalWaitOnBusy(void) {
   // Timeout at about 1s
-  for (uint32_t timeout = 0; timeout < 100; timeout++) {
+  for (uint32_t timeout = 1000; timeout > 0; timeout--) {
     if (gpio_get_level(SX1280_BUSY) == 0) {
       return;
     }
-    DelayMs(10);
+    DelayMs(1);
   }
   gChipError = true;
   printf("ERROR. SX1280HalWaitOnBusy Timeout.\n");

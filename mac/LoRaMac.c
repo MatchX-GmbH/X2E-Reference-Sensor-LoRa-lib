@@ -818,6 +818,8 @@ static void ProcessRadioTxDone( void )
     TimerSetValue( &MacCtx.RxWindowTimer2, MacCtx.RxWindow2Delay - offset );
     TimerStart( &MacCtx.RxWindowTimer2 );
     CRITICAL_SECTION_END( );
+    LORAMAC_PRINTLINE("RxWindowTimer1=%d", MacCtx.RxWindow1Delay - offset);
+    LORAMAC_PRINTLINE("RxWindowTimer2=%d", MacCtx.RxWindow2Delay - offset);
 
     if( MacCtx.NodeAckRequested == true )
     {
@@ -942,6 +944,7 @@ static void ProcessRadioRxDone( void )
     // Abort on empty radio frames
     if( size == 0 )
     {
+        LORAMAC_PRINTLINE("%s. Empty frame.", __func__);
         MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
         PrepareRxDoneAbort( );
         return;
@@ -952,6 +955,7 @@ static void ProcessRadioRxDone( void )
     // Accept frames of LoRaWAN Major Version 1 only
     if( macHdr.Bits.Major != 0 )
     {
+        LORAMAC_PRINTLINE("%s. Major Version is not 1.", __func__);
         MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
         PrepareRxDoneAbort( );
         return;
@@ -964,6 +968,7 @@ static void ProcessRadioRxDone( void )
             // Check if the received frame size is valid
             if( size < LORAMAC_JOIN_ACCEPT_FRAME_MIN_SIZE )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_JOIN_ACCEPT. Invalid frame size.", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -974,6 +979,7 @@ static void ProcessRadioRxDone( void )
             // Abort in case if the device is already joined and no rejoin request is ongoing.
             if( ( Nvm.MacGroup2.NetworkActivation != ACTIVATION_TYPE_NONE ) && ( Nvm.MacGroup2.IsRejoinAcceptPending == false ) )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_JOIN_ACCEPT. Already join.", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -1119,6 +1125,7 @@ static void ProcessRadioRxDone( void )
             if( ( MAX( 0, ( int16_t )( ( int16_t ) size - ( int16_t ) LORAMAC_FRAME_PAYLOAD_OVERHEAD_SIZE ) ) > ( int16_t )phyParam.Value ) ||
                 ( size < LORAMAC_FRAME_PAYLOAD_MIN_SIZE ) )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_DATA_UNCONFIRMED_DOWN. Invalid payload size", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -1130,6 +1137,7 @@ static void ProcessRadioRxDone( void )
 
             if( LORAMAC_PARSER_SUCCESS != LoRaMacParserData( &macMsgData ) )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_DATA_UNCONFIRMED_DOWN. Parser failed.", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -1161,6 +1169,7 @@ static void ProcessRadioRxDone( void )
             FType_t fType;
             if( LORAMAC_STATUS_OK != DetermineFrameType( &macMsgData, &fType ) )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_DATA_UNCONFIRMED_DOWN. Invalid frame type", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -1191,6 +1200,7 @@ static void ProcessRadioRxDone( void )
                                         ( macMsgData.FHDR.FCtrl.Bits.Ack != 0 ) ||
                                         ( macMsgData.FHDR.FCtrl.Bits.AdrAckReq != 0 ) ) )
             {
+                LORAMAC_PRINTLINE("%s. FRAME_TYPE_DATA_UNCONFIRMED_DOWN. multicast downlink exceptions.", __func__);
                 MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 PrepareRxDoneAbort( );
                 return;
@@ -1208,6 +1218,7 @@ static void ProcessRadioRxDone( void )
                 else
                 {
                     // Other errors
+                    LORAMAC_PRINTLINE("%s. FRAME_TYPE_DATA_UNCONFIRMED_DOWN. Other FCNT error.", __func__);
                     MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
                 }
                 MacCtx.McpsIndication.DownLinkCounter = downLinkCounter;
