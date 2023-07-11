@@ -107,14 +107,14 @@ static void LoRaDioIrqTask(void* arg) {
         // Call radio IRQ
         if (Radio.IrqProcess == NULL) break;
         Radio.IrqProcess();
-        vTaskDelay(1 / portTICK_PERIOD_MS);
+        vTaskDelay(5 / portTICK_PERIOD_MS);
 
         // DIO back to low, exit
         if ((SX126xGetDio1PinState() == 0) && (SX1280HalGetDioStatus() == 0)) break;
 
         // DIO keep high, wait a while and process again
         LORAPLATFORM_PRINTLINE("DIO still high.");
-        vTaskDelay(4 / portTICK_PERIOD_MS);
+        vTaskDelay(5 / portTICK_PERIOD_MS);
       }
     }
   }
