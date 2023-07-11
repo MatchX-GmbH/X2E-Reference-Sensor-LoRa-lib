@@ -1075,8 +1075,8 @@ void RadioStandby( void )
 
 void RadioRx( uint32_t timeout )
 {
-    SX126xSetDioIrqParams( IRQ_RADIO_ALL, //IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT,
-                           IRQ_RADIO_ALL, //IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT,
+    SX126xSetDioIrqParams( IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT,
+                           IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT,
                            IRQ_RADIO_NONE,
                            IRQ_RADIO_NONE );
 
@@ -1086,15 +1086,15 @@ void RadioRx( uint32_t timeout )
         TimerStart( &RxTimeoutTimer );
     }
 
-    SX126xSetRx( 0xFFFFFF ); // Always use Continuous
-    // if( RxContinuous == true )
-    // {
-    //     SX126xSetRx( 0xFFFFFF ); // Rx Continuous
-    // }
-    // else
-    // {
-    //     SX126xSetRx( RxTimeout << 6 );
-    // }
+    if( RxContinuous == true )
+    {
+        SX126xSetRx( 0xFFFFFF ); // Rx Continuous
+    }
+    else
+    {
+        SX126xSetRx( 0 ); // Always use Continuous
+//        SX126xSetRx( RxTimeout << 6 );
+    }
 }
 
 void RadioRxBoosted( uint32_t timeout )
@@ -1273,6 +1273,7 @@ void RadioIrqProcess( void )
     {
         uint16_t irqRegs = SX126xGetIrqStatus( );
         SX126xClearIrqStatus( irqRegs );
+        // LORARADIO_PRINTLINE("irqRegs=%04X", irqRegs);
 
         // Check if DIO1 pin is High. If it is the case revert IrqFired to true
         CRITICAL_SECTION_BEGIN( );
