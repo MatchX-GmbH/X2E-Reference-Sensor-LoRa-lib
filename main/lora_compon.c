@@ -66,6 +66,19 @@ static const char *kSubGHzRegionName = "IN865";
 static const char *kSubGHzRegionName = "";
 #endif
 
+// Kconfig
+#if defined(CONFIG_LORAWAN_PREFERRED_ISM2400)
+#define LORAWAN_USING_ISM2400 true
+#else
+#define LORAWAN_USING_ISM2400 false
+#endif
+
+#if defined(CONFIG_LORAWAN_DEFAULT_DATARATE)
+#define LORAWAN_DEFAULT_DATARATE CONFIG_LORAWAN_DEFAULT_DATARATE
+#else
+#define LORAWAN_DEFAULT_DATARATE DR_3
+#endif
+
 //
 #if defined(REGION_EU868) || defined(REGION_RU864) || defined(REGION_CN779) || defined(REGION_EU433)
 #include "LoRaMacTest.h"
@@ -75,7 +88,8 @@ static const char *kSubGHzRegionName = "";
 // Default datarate
 #define LORAWAN_HELLO_DATARATE DR_3
 #define LORAWAN_JOIN_DR_MIN DR_0
-#define LORAWAN_JOIN_DR_MAX CONFIG_LORAWAN_DEFAULT_DATARATE
+#define LORAWAN_JOIN_DR_MAX LORAWAN_DEFAULT_DATARATE
+#define LORAWAN_ISM2400_DATARATE DR_3
 
 // LoRaWAN Adaptive Data Rate
 //  remark Please note that when ADR is enabled the end-device should be static
@@ -179,7 +193,6 @@ static uint8_t gRxBuf[LORA_MAX_PAYLOAD_LEN];
 static LoraAppData_t gRxData = {gRxBuf, 0, 0, 0};
 
 static bool gSendingBlankFrame;
-static int8_t gCurrentDateRate = CONFIG_LORAWAN_DEFAULT_DATARATE;
 
 static uint32_t gAckIndex;
 static uint8_t gJoinRetryTimes;
@@ -197,6 +210,9 @@ static uint32_t gJoinInterval;
 static uint8_t gBatteryValue;
 
 static LoRaSetting_t gLoRaSetting;
+
+static int8_t gCurrentDateRate;
+static bool gUsingIsm2400;
 
 //==========================================================================
 // MAC status strings
@@ -343,7 +359,7 @@ static int8_t sendBlankFrame(void) {
   McpsReq_t mcpsReq;
   LoRaMacStatus_t ret_mac;
 
-  if (!LORAWAN_ADR_ON) {
+  if ((!LORAWAN_ADR_ON) || (gUsingIsm2400)) {
     mibReq.Type = MIB_CHANNELS_DATARATE;
     mibReq.Param.ChannelsDatarate = gCurrentDateRate;
     LoRaMacMibSetRequestConfirm(&mibReq);
@@ -626,11 +642,11 @@ static void InitOtaa(void) {
   MibRequestConfirm_t mibReq;
 
   mibReq.Type = MIB_CHANNELS_DEFAULT_DATARATE;
-  mibReq.Param.ChannelsDefaultDatarate = CONFIG_LORAWAN_DEFAULT_DATARATE;
+  mibReq.Param.ChannelsDefaultDatarate = gCurrentDateRate;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_CHANNELS_DATARATE;
-  mibReq.Param.ChannelsDatarate = CONFIG_LORAWAN_DEFAULT_DATARATE;
+  mibReq.Param.ChannelsDatarate = gCurrentDateRate;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   // Setup Dev EUI
@@ -690,6 +706,8 @@ void loraTask(void *param) {
   gLoRaTaskAbort = false;
   gTxConfirmed = true;
   gUnconfigmedCount = 0;
+  gUsingIsm2400 = LORAWAN_USING_ISM2400;
+  gCurrentDateRate = LORAWAN_DEFAULT_DATARATE;
 
   //
   // ExtPowerInit();
@@ -718,6 +736,7 @@ void loraTask(void *param) {
     // State machine
     switch (gLoraLinkState) {
       case S_LORALINK_INIT: {
+        int ret_mac;
         MibRequestConfirm_t mibReq;
 
         // LORACOMPON_PRINTLINE("S_LORALINK_INIT");
@@ -731,7 +750,11 @@ void loraTask(void *param) {
         gLoRaMacCallbacks.GetTemperatureLevel = NULL;
         gLoRaMacCallbacks.NvmDataChange = NULL;
         gLoRaMacCallbacks.MacProcessNotify = OnMacProcessNotify;
-        int ret_mac = LoRaMacInitialization(&gLoRaMacPrimitives, &gLoRaMacCallbacks, SUB_GHZ_REGION);
+        if (gUsingIsm2400) {
+          ret_mac = LoRaMacInitialization(&gLoRaMacPrimitives, &gLoRaMacCallbacks, LORAMAC_REGION_ISM2400);
+        } else {
+          ret_mac = LoRaMacInitialization(&gLoRaMacPrimitives, &gLoRaMacCallbacks, SUB_GHZ_REGION);
+        }
         if (ret_mac != LORAMAC_STATUS_OK) {
           printf("ERROR. LoRaMac wasn't properly initialized, error: %s\n", getMacStatusString(ret_mac));
           // Fatal error, endless loop.
@@ -740,14 +763,22 @@ void loraTask(void *param) {
         }
 
         // LoRa settings
+        bool using_adr = LORAWAN_ADR_ON;
+        if (gUsingIsm2400) {
+          gCurrentDateRate = LORAWAN_ISM2400_DATARATE;
+          using_adr = false;
+        } else {
+          gCurrentDateRate = LORAWAN_DEFAULT_DATARATE;
+        }
+
         mibReq.Type = MIB_PUBLIC_NETWORK;
         mibReq.Param.EnablePublicNetwork = LORAWAN_PUBLIC_NETWORK;
         LoRaMacMibSetRequestConfirm(&mibReq);
 
         mibReq.Type = MIB_ADR;
-        mibReq.Param.AdrEnable = LORAWAN_ADR_ON;
+        mibReq.Param.AdrEnable = using_adr;
         LoRaMacMibSetRequestConfirm(&mibReq);
-        if (LORAWAN_ADR_ON) {
+        if (using_adr) {
           LORACOMPON_PRINTLINE("ADR is ON.");
         } else {
           LORACOMPON_PRINTLINE("ADR is OFF.");
@@ -765,13 +796,21 @@ void loraTask(void *param) {
                                              //          to early and missed the signal.
         LoRaMacMibSetRequestConfirm(&mibReq);
 
+        if (gUsingIsm2400) {
+          // Set Channels mask, forced to using CH0
+          uint16_t ch_mask[6] = {0x0001, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
+          mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
+          mibReq.Param.ChannelsDefaultMask = ch_mask;
+          LoRaMacMibSetRequestConfirm(&mibReq);
+        } else {
 #if defined(REGION_US915)
-        // Set Channels mask
-        uint16_t ch_mask[6] = {0xff00, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
-        mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
-        mibReq.Param.ChannelsDefaultMask = ch_mask;
-        LoRaMacMibSetRequestConfirm(&mibReq);
+          // Set Channels mask
+          uint16_t ch_mask[6] = {0xff00, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
+          mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
+          mibReq.Param.ChannelsDefaultMask = ch_mask;
+          LoRaMacMibSetRequestConfirm(&mibReq);
 #endif
+        }
 
         LoRaMacStart();
 

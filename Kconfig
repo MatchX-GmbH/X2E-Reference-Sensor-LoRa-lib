@@ -13,21 +13,52 @@ menu "LoRaWAN"
         help
             Enter the default datarate.
 
-    config MAX_LINK_FAIL_COUNT
-        int "Max number of consecutive fail"
-        default 8
-        range 1 99
-        help
-            When the maximum number of consecutive fail reach,
-            the LoRa will start over and try to JOIN again.
-
-    config INTERVAL_UNCONFIRMED_TO_CONFIRMED
+    config LORAWAN_UNCONFIRMED_COUNT
         int "Number of unconfirmed between confirmed frames"
         default 0
-        range 0 99
+        range 0 999
         help
             Set the number of unconfirmed frames between confirmed frames.
             A 0 means always sending confirmed frames.
+
+    config LORAWAN_MAX_NOACK_RETRY
+        int "Max number retry when no ACK"
+        default 3
+        range 1 99
+        help
+            Set the maximum of retry when no ACK received for a confirmed frame.
+            When maximum retry reached, IsSendDone will return true and mark as fail.
+
+    config LORAWAN_LINK_FAIL_COUNT
+        int "Number of retry for Link Down"
+        default 8
+        range 0 999
+        help
+            When number of retry reach this number, it will treat as link down.
+            The LoRa will start over and try to JOIN again.
+
+    config LORAWAN_SW_RADIO_COUNT
+        int "Number of retry to switch radio"
+        default 0
+        range 0 99
+        help
+            When number of retry reach this number, it will switch to other radio.
+            Set to 0 means no radio switching.
+
+    choice LORAWAN_PREFERRED_RADIO
+        prompt "Preferred Radio"
+        default LORAWAN_PREFERRED_ISM2400
+        help
+            Select the preferred radio.
+
+        config LORAWAN_PREFERRED_ISM2400
+            bool "ISM2400 (SX1280)"
+
+        config LORAWAN_PREFERRED_SUBGHZ
+            bool "sub-GHz (SX1261)"
+
+    endchoice # LORAWAN_PREFERRED_RADIO
+
 
     choice LORAWAN_SUBGHZ_REGION
         prompt "Region for sub-GHz"
@@ -41,7 +72,7 @@ menu "LoRaWAN"
         config LORAWAN_REGION_US915
             bool "US915 - For USA"
 
-    endchoice #LORG_SUBGHZ_REGION
+    endchoice # LORAWAN_SUBGHZ_REGION
 
     config LORACOMPON_DEBUG
         bool "Show component debug message"
