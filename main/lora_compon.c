@@ -897,7 +897,11 @@ void loraTask(void *param) {
         //
         MlmeReq_t mlmeReq;
         mlmeReq.Type = MLME_JOIN;
-        mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
+        if (gUsingIsm2400) {
+          mlmeReq.Req.Join.Datarate = LORAWAN_ISM2400_DATARATE;
+        } else {
+          mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
+        }
         mlmeReq.Req.Join.NetworkActivation = ACTIVATION_TYPE_OTAA;
 
         LORACOMPON_PRINTLINE("Start to Join, dr=%d", mlmeReq.Req.Join.Datarate);
