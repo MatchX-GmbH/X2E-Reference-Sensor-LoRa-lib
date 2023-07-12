@@ -61,7 +61,7 @@ void SX126xIoInit(void) {
     spi_device_interface_config_t sx1261_cfg;
     memset(&sx1261_cfg, 0, sizeof(sx1261_cfg));
     sx1261_cfg.mode = 0;  // SPI mode 0
-    sx1261_cfg.clock_speed_hz = SPI_MASTER_FREQ_13M;
+    sx1261_cfg.clock_speed_hz = SPI_MASTER_FREQ_8M;
     sx1261_cfg.spics_io_num = SX1261_SS;
     sx1261_cfg.flags = 0;
     sx1261_cfg.queue_size = 20;

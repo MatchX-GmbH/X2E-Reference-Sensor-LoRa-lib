@@ -71,7 +71,7 @@ void SX1280HalInit(void) {
     spi_device_interface_config_t sx1280_cfg;
     memset(&sx1280_cfg, 0, sizeof(sx1280_cfg));
     sx1280_cfg.mode = 0;  // SPI mode 0
-    sx1280_cfg.clock_speed_hz = SPI_MASTER_FREQ_10M;
+    sx1280_cfg.clock_speed_hz = SPI_MASTER_FREQ_8M;
     sx1280_cfg.spics_io_num = SX1280_SS;
     sx1280_cfg.flags = 0;
     sx1280_cfg.queue_size = 20;
