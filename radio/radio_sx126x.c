@@ -590,7 +590,6 @@ void RadioSetModem( RadioModems_t modem )
 void RadioSetChannel( uint32_t freq )
 {
     SX126xSetRfFrequency( freq );
-    LORARADIO_PRINTLINE("SetChannel, freq=%u", freq);
 }
 
 bool RadioIsChannelFree( uint32_t freq, uint32_t rxBandwidth, int16_t rssiThresh, uint32_t maxCarrierSenseTime )
