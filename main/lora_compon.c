@@ -39,6 +39,8 @@
 
 //==========================================================================
 //==========================================================================
+#define LORAWAN_PUBLIC_NETWORK true
+
 // Active LoRa Region
 #if defined(REGION_CN470)
 #define SUB_GHZ_REGION LORAMAC_REGION_CN470
@@ -79,6 +81,36 @@ static const char *kSubGHzRegionName = "";
 #define LORAWAN_DEFAULT_DATARATE DR_3
 #endif
 
+#if defined(CONFIG_LORAWAN_SW_RADIO_COUNT)
+#define LORAWAN_SW_RADIO_COUNT CONFIG_LORAWAN_SW_RADIO_COUNT
+#else
+#define LORAWAN_SW_RADIO_COUNT 2
+#endif
+
+#if defined(CONFIG_LORAWAN_MAX_NOACK_RETRY)
+#define LORAWAN_MAX_NOACK_RETRY CONFIG_LORAWAN_MAX_NOACK_RETRY
+#else
+#define LORAWAN_MAX_NOACK_RETRY 2
+#endif
+
+#if defined(CONFIG_LORAWAN_NOACK_RETRY_INTERVAL)
+#define LORAWAN_NOACK_RETRY_INTERVAL (CONFIG_LORAWAN_NOACK_RETRY_INTERVAL * 1000)
+#else
+#define LORAWAN_NOACK_RETRY_INTERVAL (20 * 1000)
+#endif
+
+#if defined(CONFIG_LORAWAN_LINK_FAIL_COUNT)
+#define LORAWAN_LINK_FAIL_COUNT CONFIG_LORAWAN_LINK_FAIL_COUNT
+#else
+#define LORAWAN_LINK_FAIL_COUNT 8
+#endif
+
+#if defined(CONFIG_LORAWAN_UNCONFIRMED_COUNT)
+#define LORAWAN_UNCONFIRMED_COUNT CONFIG_LORAWAN_UNCONFIRMED_COUNT
+#else
+#define LORAWAN_UNCONFIRMED_COUNT 0
+#endif
+
 //
 #if defined(REGION_EU868) || defined(REGION_RU864) || defined(REGION_CN779) || defined(REGION_EU433)
 #include "LoRaMacTest.h"
@@ -99,25 +131,11 @@ static const char *kSubGHzRegionName = "";
 #define LORAWAN_ADR_ON false
 #endif
 
-// Retries
-#define NUM_OF_RETRY_TX 2
-
-// Link setting
-#if defined(CONFIG_MAX_LINK_FAIL_COUNT)
-#define MAX_LINK_FAIL_COUNT CONFIG_MAX_LINK_FAIL_COUNT
-#else
-#define MAX_LINK_FAIL_COUNT 8
-#endif
-
-#if defined(CONFIG_INTERVAL_UNCONFIRMED_TO_CONFIRMED)
-#define INTERVAL_UNCONFIRMED_TO_CONFIRMED CONFIG_INTERVAL_UNCONFIRMED_TO_CONFIRMED
-#else
-#define INTERVAL_UNCONFIRMED_TO_CONFIRMED 4
-#endif
+#define LORAWAN_FPORT_DATA 2
 
 // ms
-#define TIME_JOIN_INTERVAL_MIN 60000
-#define RAND_RANGE_JOIN_INTERVAL 30000
+#define TIME_JOIN_INTERVAL_MIN 90000
+#define TIME_JOIN_INTERVAL_MAX 120000
 
 #define TIME_TXCHK_INTERVAL 10000
 
@@ -147,7 +165,9 @@ typedef enum {
   S_LORALINK_SEND,
   S_LORALINK_SEND_MAC,
   S_LORALINK_SEND_WAITING,
-  S_LORALINK_SEND_END,
+  S_LORALINK_SEND_SUCCESS,
+  S_LORALINK_SEND_FAILURE,
+  S_LORALINK_RETRY_WAITING,
   S_LORALINK_WAITING,
   S_LORALINK_SLEEP,
   S_LORALINK_WAKEUP,
@@ -178,25 +198,34 @@ static bool gLoRaTaskAbort;
 //
 typedef struct TLoraAppData {
   uint8_t *data;
-  uint8_t dataSize;
+  int16_t dataSize;
   uint8_t port;
   uint8_t retry;
 } LoraAppData_t;
 
+// Link status bits
+static volatile uint32_t gLinkStatus;
+#define BIT_LORASTATUS_ERROR 0x8000
+#define BIT_LORASTATUS_JOIN_PASS 0x0001
+#define BIT_LORASTATUS_JOIN_FAIL 0x0100
+#define BIT_LORASTATUS_SEND_PASS 0x0002
+#define BIT_LORASTATUS_SEND_FAIL 0x0200
+#define BIT_LORASTATUS_TX_RDY 0x0004
+#define BIT_LORASTATUS_RX_RDY 0x0008
+#define BIT_LORASTATUS_DEV_PROV 0x0080
+
 //
-static uint8_t gTxBuf[LORA_MAX_PAYLOAD_LEN];
-static LoraAppData_t gTxData = {gTxBuf, 1, 10, 0};
+static uint8_t gTxBuf[LORAWAN_MAX_PAYLOAD_LEN];
+static LoraAppData_t gTxData = {.data = gTxBuf, .dataSize = -1, .port = LORAWAN_FPORT_DATA, .retry = 0};
 static bool gTxConfirmed;
 static uint16_t gUnconfigmedCount;
 
-static uint8_t gRxBuf[LORA_MAX_PAYLOAD_LEN];
-static LoraAppData_t gRxData = {gRxBuf, 0, 0, 0};
+static uint8_t gRxBuf[LORAWAN_MAX_PAYLOAD_LEN];
+static LoraAppData_t gRxData = {.data = gRxBuf, .dataSize = -1, .port = 0, .retry = 0};
 
-static bool gSendingBlankFrame;
-
-static uint32_t gAckIndex;
+static uint32_t gAckCount;
+static uint32_t gNakCount;
 static uint8_t gJoinRetryTimes;
-static volatile uint32_t gLinkStatus;
 static int16_t gLastRxRssi;
 static uint8_t gLastRxDatarate;
 static uint32_t gProvisionStatus;
@@ -352,44 +381,6 @@ static void ProvisioningAuth(void) {
 }
 
 //==========================================================================
-// Send a blank frame
-//==========================================================================
-static int8_t sendBlankFrame(void) {
-  MibRequestConfirm_t mibReq;
-  McpsReq_t mcpsReq;
-  LoRaMacStatus_t ret_mac;
-
-  if ((!LORAWAN_ADR_ON) || (gUsingIsm2400)) {
-    mibReq.Type = MIB_CHANNELS_DATARATE;
-    mibReq.Param.ChannelsDatarate = gCurrentDateRate;
-    LoRaMacMibSetRequestConfirm(&mibReq);
-  }
-
-  if (gTxConfirmed) {
-    mcpsReq.Type = MCPS_CONFIRMED;
-    mcpsReq.Req.Confirmed.fPort = gTxData.port;
-    mcpsReq.Req.Confirmed.fBuffer = gTxData.data;
-    mcpsReq.Req.Confirmed.fBufferSize = 0;
-    mcpsReq.Req.Confirmed.Datarate = gCurrentDateRate;
-  } else {
-    mcpsReq.Type = MCPS_UNCONFIRMED;
-    mcpsReq.Req.Unconfirmed.fPort = gTxData.port;
-    mcpsReq.Req.Unconfirmed.fBuffer = gTxData.data;
-    mcpsReq.Req.Unconfirmed.fBufferSize = 0;
-    mcpsReq.Req.Unconfirmed.Datarate = gCurrentDateRate;
-  }
-
-  gSendingBlankFrame = true;
-  ret_mac = LoRaMacMcpsRequest(&mcpsReq);
-  if (ret_mac == LORAMAC_STATUS_OK) {
-    return 0;
-  } else {
-    LORACOMPON_PRINTLINE("LoRaMacMcpsRequest() failed, %s", getMacStatusString(ret_mac));
-    return -1;
-  }
-}
-
-//==========================================================================
 // Return: true - send failed
 //==========================================================================
 static int8_t sendFrame(void) {
@@ -399,7 +390,7 @@ static int8_t sendFrame(void) {
   LoRaMacTxInfo_t txInfo;
 
   // Set Datarate
-  if (!LORAWAN_ADR_ON) {
+  if ((!LORAWAN_ADR_ON) || (gUsingIsm2400)) {
     mibReq.Type = MIB_CHANNELS_DATARATE;
     mibReq.Param.ChannelsDatarate = gCurrentDateRate;
     LoRaMacMibSetRequestConfirm(&mibReq);
@@ -412,18 +403,10 @@ static int8_t sendFrame(void) {
     // LORACOMPON_PRINTLINE("MaxPossibleApplicationDataSize=%d", txInfo.MaxPossibleApplicationDataSize);
     if (ret_mac == LORAMAC_STATUS_LENGTH_ERROR) {
       printf("ERROR. Payload is too large at current datarate. Max is %d.\n", txInfo.CurrentPossiblePayloadSize);
-      if (LORAWAN_ADR_ON) {
-        LORACOMPON_PRINTLINE("ADR is on. Sending a blank frame.");
-        sendBlankFrame();
-        return -1;
-      } else {
-        gTxData.retry = 0;  // No more retry
-        return -1;
-      }
     } else {
       printf("ERROR. LoRaMacQueryTxPossible() failed, %s\n", getMacStatusString(ret_mac));
-      return -1;
     }
+    return -1;
   }
 
   if (gTxConfirmed) {
@@ -447,7 +430,6 @@ static int8_t sendFrame(void) {
   }
 
   //
-  gSendingBlankFrame = false;
   ret_mac = LoRaMacMcpsRequest(&mcpsReq);
   if (ret_mac == LORAMAC_STATUS_OK) {
     return 0;
@@ -461,22 +443,17 @@ static int8_t sendFrame(void) {
 // MCPS-Confirm event function
 //==========================================================================
 static void McpsConfirm(McpsConfirm_t *mcpsConfirm) {
-  if (!gSendingBlankFrame) {
-    gTxData.dataSize = 0;
-  }
   if (mcpsConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
     LORACOMPON_PRINTLINE("McpsConfirm() OK");
     if (!gTxConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
-      gLinkFailCount = 0;
       FreeMutex();
     }
   } else {
     printf("ERROR. McpsConfirm() failed. %s\n", getMacEventStatusString(mcpsConfirm->Status));
     TakeMutex();
     gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
-    gLinkFailCount++;
     FreeMutex();
   }
   // LoRaComponNotify(EVENT_NOTIF_LORAMAC, NULL);
@@ -507,9 +484,11 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
       case 224:
         break;
       default: {
+        TakeMutex();
         gRxData.port = mcpsIndication->Port;
         gRxData.dataSize = mcpsIndication->BufferSize;
         memcpy1(gRxData.data, mcpsIndication->Buffer, gRxData.dataSize);
+        FreeMutex();
         LORACOMPON_PRINTLINE("Rxed %d bytes.", gRxData.dataSize);
         break;
       }
@@ -517,11 +496,11 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
   }
   if (mcpsIndication->AckReceived) {
     // ACK
-    LORACOMPON_PRINTLINE("rx, ACK, index %u", (unsigned int)gAckIndex++);
+    gAckCount++;
+    LORACOMPON_PRINTLINE("AckReceived, gAckCount=%u", gAckCount);
     if (gTxConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
-      gLinkFailCount = 0;
       FreeMutex();
     }
   }
@@ -539,7 +518,6 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
     case MLME_JOIN: {
       if (mlmeConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
         // Status is OK, node has joined the network
-        gJoinRetryTimes = 0;
         TakeMutex();
         gLinkStatus |= BIT_LORASTATUS_JOIN_PASS;
         FreeMutex();
@@ -548,7 +526,6 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
         TakeMutex();
         gLinkStatus |= BIT_LORASTATUS_JOIN_FAIL;
         FreeMutex();
-        gJoinRetryTimes++;
       }
       break;
     }
@@ -699,7 +676,8 @@ static void InitOtaa(void) {
 void loraTask(void *param) {
   gLoraLinkState = S_LORALINK_INIT;
   gLastRxRssi = -999;
-  gAckIndex = 0;
+  gAckCount = 0;
+  gNakCount = 0;
   gJoinRetryTimes = 0;
   gJoinInterval = 0;
   gBatteryValue = BAT_LEVEL_NO_MEASURE;
@@ -814,14 +792,13 @@ void loraTask(void *param) {
 
         LoRaMacStart();
 
-        gTxData.dataSize = 0;
-        gRxData.dataSize = 0;
-        gSendingBlankFrame = false;
         gTxConfirmed = true;
         gUnconfigmedCount = 0;
         TakeMutex();
         gLinkStatus = 0;
         gLinkFailCount = 0;
+        gTxData.dataSize = -1;  // Ready for TX
+        gRxData.dataSize = -1;  // Ready for RX
         FreeMutex();
 #if mx_configUSE_DEVICE_PROVISIONING
         if (gLoRaSetting.provisionDone) {
@@ -911,7 +888,7 @@ void loraTask(void *param) {
         }
 
         gLoraLinkState = S_LORALINK_JOIN_WAIT;
-        gJoinInterval = TIME_JOIN_INTERVAL_MIN + randr(0, RAND_RANGE_JOIN_INTERVAL);
+        gJoinInterval = randr(TIME_JOIN_INTERVAL_MIN, TIME_JOIN_INTERVAL_MAX);
         gTickLoraLink = LoRaGetTick();
         break;
       }
@@ -921,8 +898,17 @@ void loraTask(void *param) {
         uint32_t status = gLinkStatus;
         FreeMutex();
         if (status & BIT_LORASTATUS_JOIN_PASS) {
+          gJoinRetryTimes = 0;
           gLoraLinkState = S_LORALINK_JOINED;
         } else if (LoRaTickElapsed(gTickLoraLink) >= gJoinInterval) {
+          if (LORAWAN_SW_RADIO_COUNT != 0) {
+            LORACOMPON_PRINTLINE("gJoinRetryTimes=%d", gJoinRetryTimes);
+            gJoinRetryTimes++;
+            if (gJoinRetryTimes >= LORAWAN_SW_RADIO_COUNT) {
+              gUsingIsm2400 = !gUsingIsm2400;
+              gJoinRetryTimes = 0;
+            }
+          }
           gLoraLinkState = S_LORALINK_INIT;
         }
         break;
@@ -937,28 +923,40 @@ void loraTask(void *param) {
 
       case S_LORALINK_SEND: {
         if (sendFrame() < 0) {
-          if (gTxData.retry > 0) {
-            LORACOMPON_PRINTLINE("TX failed. retry=%d", gTxData.retry);
-            gTxData.retry--;
-          } else {
-            // TX dropped
-            LORACOMPON_PRINTLINE("TX dropped.");
-            gTxData.dataSize = 0;
-            TakeMutex();
-            gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
-            gLinkFailCount++;
-            FreeMutex();
-          }
-          gLoraLinkState = S_LORALINK_WAITING;
-        } else {
-          gLoraLinkState = S_LORALINK_SEND_WAITING;
+          LORACOMPON_PRINTLINE("sendFrame() failed.");
+          TakeMutex();
+          gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
+          FreeMutex();
         }
+        // gTxData.retry ++;
+        // if (gTxData.retry > 0) {
+        //   LORACOMPON_PRINTLINE("TX failed. retry=%d", gTxData.retry);
+        // } else {
+        //   // TX dropped
+        //   LORACOMPON_PRINTLINE("TX dropped.");
+        //   gTxData.dataSize = 0;
+        //   TakeMutex();
+        //   gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
+        //   gLinkFailCount++;
+        //   FreeMutex();
+        // }
+        // gLoraLinkState = S_LORALINK_WAITING;
+        // } else {
+        //   gLoraLinkState = S_LORALINK_SEND_WAITING;
+        // }
+        gLoraLinkState = S_LORALINK_SEND_WAITING;
         gTickLoraLink = LoRaGetTick();
         break;
       }
 
       case S_LORALINK_SEND_MAC: {
-        if (sendBlankFrame() < 0) {
+        TakeMutex();
+        gTxData.dataSize = 0;
+        FreeMutex();
+        if (sendFrame() < 0) {
+          TakeMutex();
+          gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
+          FreeMutex();
         }
         gLoraLinkState = S_LORALINK_WAITING;
         gTickLoraLink = LoRaGetTick();
@@ -969,44 +967,78 @@ void loraTask(void *param) {
         TakeMutex();
         uint32_t status = gLinkStatus;
         FreeMutex();
-        if (((status & BIT_LORASTATUS_SEND_FAIL) != 0) || ((status & BIT_LORASTATUS_SEND_PASS) != 0)) {
-          gLoraLinkState = S_LORALINK_SEND_END;
+        if ((status & BIT_LORASTATUS_SEND_PASS) != 0) {
+          gLoraLinkState = S_LORALINK_SEND_SUCCESS;
+        } else if ((status & BIT_LORASTATUS_SEND_FAIL) != 0) {
+          gLoraLinkState = S_LORALINK_SEND_FAILURE;
         } else if (LoRaTickElapsed(gTickLoraLink) >= TIMEOUT_SEND_WAITING) {
           printf("ERROR. SEND_WAITING timeout.\n");
-          gTxData.dataSize = 0;
           TakeMutex();
           gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
-          gLinkFailCount++;
           FreeMutex();
-          gLoraLinkState = S_LORALINK_SEND_END;
+          gLoraLinkState = S_LORALINK_SEND_FAILURE;
         }
         break;
       }
 
-      case S_LORALINK_SEND_END:
-        gUnconfigmedCount++;
-        if (gUnconfigmedCount >= INTERVAL_UNCONFIRMED_TO_CONFIRMED) {
+      case S_LORALINK_SEND_FAILURE:
+        gNakCount ++;
+        gLinkFailCount++;
+        TakeMutex();
+        gTxData.retry++;
+        FreeMutex();
+        if ((gTxData.retry <= LORAWAN_MAX_NOACK_RETRY) && (gLinkFailCount < LORAWAN_LINK_FAIL_COUNT)) {
+          // Do retry
+          TakeMutex();
+          gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
+          FreeMutex();
+          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_RETRY_WAITING;
+
+        } else {
+          TakeMutex();
+          gTxData.dataSize = -1;  // End of TX
+          FreeMutex();
+          gTickLoraLink = 0;  // Instant check on S_LORALINK_WAITING
+          gLoraLinkState = S_LORALINK_WAITING;
+        }
+        break;
+
+      case S_LORALINK_SEND_SUCCESS:
+        TakeMutex();
+        gTxData.dataSize = -1;  // End of TX
+        FreeMutex();
+        gLinkFailCount = 0;
+        if (gUnconfigmedCount >= LORAWAN_UNCONFIRMED_COUNT) {
           gUnconfigmedCount = 0;
           gTxConfirmed = true;
         } else {
+          gUnconfigmedCount++;
           gTxConfirmed = false;
         }
         gTickLoraLink = LoRaGetTick();
         gLoraLinkState = S_LORALINK_WAITING;
         break;
 
+      case S_LORALINK_RETRY_WAITING:
+        if (LoRaTickElapsed(gTickLoraLink) >= LORAWAN_NOACK_RETRY_INTERVAL) {
+          LORACOMPON_PRINTLINE("Retry %d, gNakCount=%d", gTxData.retry, gNakCount);
+          gLoraLinkState = S_LORALINK_SEND;
+        }
+        break;
+
       case S_LORALINK_WAITING: {
         TakeMutex();
         uint32_t status = gLinkStatus;
-        uint32_t fail_count = gLinkFailCount;
+        int16_t tx_len = gTxData.dataSize;
         FreeMutex();
         if (status & BIT_LORASTATUS_JOIN_PASS) {
           if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= TIME_TXCHK_INTERVAL)) {
             gTickLoraLink = LoRaGetTick();
-            if (gLinkFailCount >= MAX_LINK_FAIL_COUNT) {
-              printf("ERROR. Too many link fail. Init again.\n");
+            if (gLinkFailCount >= LORAWAN_LINK_FAIL_COUNT) {
+              printf("ERROR. Too many link fail. Disconnect.\n");
               gLoraLinkState = S_LORALINK_INIT;
-            } else if ((gTxData.dataSize > 0) && (!LoRaMacIsBusy())) {
+            } else if ((tx_len >= 0) && (!LoRaMacIsBusy())) {
               gLoraLinkState = S_LORALINK_SEND;
             }
           }
@@ -1061,6 +1093,26 @@ void loraTask(void *param) {
   LoRaMacDeInitialization();
   gLoRaTaskHandle = NULL;
   vTaskDelete(NULL);
+}
+
+//==========================================================================
+// Get Raw Status
+//==========================================================================
+static uint32_t GetStatus(void) {
+  TakeMutex();
+  uint32_t status = gLinkStatus;
+  int16_t tx_len = gTxData.dataSize;
+  int16_t rx_len = gRxData.dataSize;
+  FreeMutex();
+  if (status & BIT_LORASTATUS_JOIN_PASS) {
+    if (rx_len >= 0) {
+      status |= BIT_LORASTATUS_RX_RDY;
+    }
+    if (tx_len < 0) {
+      status |= BIT_LORASTATUS_TX_RDY;
+    }
+  }
+  return status;
 }
 
 //==========================================================================
@@ -1145,15 +1197,15 @@ bool LoRaComponIsBusy(void) {
 //==========================================================================
 uint32_t LoRaComponGetWaitingTime(void) {
   uint32_t waiting_time = 0;
-  LoraDevicState_t state;
   TakeMutex();
-  state = gLoraLinkState;
+  LoraDevicState_t state = gLoraLinkState;
+  int16_t tx_len = gTxData.dataSize;
   FreeMutex();
   if (!LoRaMacIsBusy()) {
     waiting_time = UINT32_MAX;
     if (gTickLoraLink == 0) {
       waiting_time = 0;
-    } else if ((state == S_LORALINK_WAITING) && (gTxData.dataSize > 0)) {
+    } else if ((state == S_LORALINK_WAITING) && (tx_len >= 0)) {
       uint32_t elapsed = LoRaTickElapsed(gTickLoraLink);
       if (elapsed < TIME_TXCHK_INTERVAL) {
         waiting_time = TIME_TXCHK_INTERVAL - elapsed;
@@ -1207,13 +1259,11 @@ void LoRaComponSleepExit(void) {
 // Check ready for send data
 //==========================================================================
 bool LoRaComponIsTxReady(void) {
-  TakeMutex();
-  uint32_t status = gLinkStatus;
-  FreeMutex();
+  uint32_t status = GetStatus();
   if ((status & BIT_LORASTATUS_JOIN_PASS) == 0) {
     LORACOMPON_PRINTLINE("Not join");
     return false;
-  } else if (gTxData.dataSize != 0) {
+  } else if ((status & BIT_LORASTATUS_TX_RDY) == 0) {
     LORACOMPON_PRINTLINE("Last TX in progress");
     return false;
   } else {
@@ -1233,20 +1283,20 @@ int8_t LoRaComponSendData(const uint8_t *aData, uint16_t aLen) {
   //                     mibReq.Param.ChannelsDefaultMask[3], mibReq.Param.ChannelsDefaultMask[4],
   //                     mibReq.Param.ChannelsDefaultMask[5]);
 
-  TakeMutex();
-  gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
-  FreeMutex();
   if (!LoRaComponIsTxReady()) {
     return -1;
-  } else if (aLen > LORA_MAX_PAYLOAD_LEN) {
+  } else if (aLen > LORAWAN_MAX_PAYLOAD_LEN) {
     // Tx data too large
     return -1;
   } else {
+    TakeMutex();
+    gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
     memcpy(gTxData.data, aData, aLen);
     gTxData.dataSize = aLen;
-    gTxData.port = LORA_UPLINK_PORT;
-    gTxData.retry = NUM_OF_RETRY_TX;
+    gTxData.port = LORAWAN_FPORT_DATA;
+    gTxData.retry = 0;
     gTickLoraLink = 0;
+    FreeMutex();
     return 0;
   }
 }
@@ -1255,13 +1305,11 @@ int8_t LoRaComponSendData(const uint8_t *aData, uint16_t aLen) {
 // Check any received data
 //==========================================================================
 bool LoRaComponIsRxReady(void) {
-  TakeMutex();
-  uint32_t status = gLinkStatus;
-  FreeMutex();
+  uint32_t status = GetStatus();
   if ((status & BIT_LORASTATUS_JOIN_PASS) == 0) {
     LORACOMPON_PRINTLINE("Not join");
     return false;
-  } else if (gRxData.dataSize == 0) {
+  } else if ((status & BIT_LORASTATUS_RX_RDY) == 0) {
     return false;
   } else {
     return true;
@@ -1276,6 +1324,7 @@ int32_t LoRaComponGetData(uint8_t *aData, uint16_t aDataSize, LoRaRxInfo_t *aInf
     return -1;
   } else {
     int32_t len;
+    TakeMutex();
     if (aDataSize < gRxData.dataSize) {
       len = aDataSize;
     } else {
@@ -1287,7 +1336,8 @@ int32_t LoRaComponGetData(uint8_t *aData, uint16_t aDataSize, LoRaRxInfo_t *aInf
       aInfo->rssi = gLastRxRssi;
       aInfo->datarate = gLastRxDatarate;
     }
-    gRxData.dataSize = 0;
+    gRxData.dataSize = -1;
+    FreeMutex();
 
     return len;
   }
@@ -1324,35 +1374,12 @@ void LoRaComponSetExtPower(void) { gBatteryValue = BAT_LEVEL_EXT_SRC; }
 //==========================================================================
 // Check status
 //==========================================================================
-bool LoRaComponIsProvisioned(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_DEV_PROV) != 0); }
+bool LoRaComponIsProvisioned(void) { return ((GetStatus() & BIT_LORASTATUS_DEV_PROV) != 0); }
 
-bool LoRaComponIsJoined(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_JOIN_PASS) != 0); }
+bool LoRaComponIsJoined(void) { return ((GetStatus() & BIT_LORASTATUS_JOIN_PASS) != 0); }
 
-bool LoRaComponIsSendSuccess(void) { return ((LoRaComponGetStatus() & BIT_LORASTATUS_SEND_PASS) != 0); }
+bool LoRaComponIsSendSuccess(void) { return ((GetStatus() & BIT_LORASTATUS_SEND_PASS) != 0); }
 
-bool LoRaComponIsSendDone(void) {
-  uint32_t status = LoRaComponGetStatus();
-  if (((status & BIT_LORASTATUS_SEND_PASS) == 0) && ((status & BIT_LORASTATUS_SEND_FAIL) == 0)) {
-    return false;
-  } else {
-    return true;
-  }
-}
+bool LoRaComponIsSendDone(void) { return ((GetStatus() & BIT_LORASTATUS_TX_RDY) != 0); }
 
-//==========================================================================
-// Get Raw Status
-//==========================================================================
-uint32_t LoRaComponGetStatus(void) {
-  TakeMutex();
-  uint32_t status = gLinkStatus;
-  FreeMutex();
-  if (status & BIT_LORASTATUS_JOIN_PASS) {
-    if (gRxData.dataSize != 0) {
-      status |= BIT_LORASTATUS_RX_RDY;
-    }
-    if (gTxData.dataSize == 0) {
-      status |= BIT_LORASTATUS_TX_RDY;
-    }
-  }
-  return status;
-}
+bool LoRaComponIsIsm2400(void) { return gUsingIsm2400; }

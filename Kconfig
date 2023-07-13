@@ -29,20 +29,27 @@ menu "LoRaWAN"
             Set the maximum of retry when no ACK received for a confirmed frame.
             When maximum retry reached, IsSendDone will return true and mark as fail.
 
+    config LORAWAN_NOACK_RETRY_INTERVAL
+        int "Retry interval in seconds"
+        default 20
+        range 10 999
+        help
+            Set the interval for no ACK retry.
+
     config LORAWAN_LINK_FAIL_COUNT
-        int "Number of retry for Link Down"
+        int "Number of failure for Link Down"
         default 8
         range 0 999
         help
-            When number of retry reach this number, it will treat as link down.
+            When number of failure reach this number, it will treat as link down.
             The LoRa will start over and try to JOIN again.
 
     config LORAWAN_SW_RADIO_COUNT
-        int "Number of retry to switch radio"
+        int "Number of failure to switch radio"
         default 0
         range 0 99
         help
-            When number of retry reach this number, it will switch to other radio.
+            When number of failure reach this number, it will switch to other radio.
             Set to 0 means no radio switching.
 
     choice LORAWAN_PREFERRED_RADIO

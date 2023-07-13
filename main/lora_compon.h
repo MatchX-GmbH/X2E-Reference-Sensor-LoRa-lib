@@ -9,22 +9,8 @@
 
 //==========================================================================
 //==========================================================================
-// Config
-#define LORAWAN_PUBLIC_NETWORK true
-#define LORA_UPLINK_PORT 2
-#define LORA_MAX_PAYLOAD_LEN 128
-
-// Link status bits
-#define BIT_LORASTATUS_ERROR 0x8000
-#define BIT_LORASTATUS_JOIN_PASS 0x0001
-#define BIT_LORASTATUS_JOIN_FAIL 0x0100
-#define BIT_LORASTATUS_SEND_PASS 0x0002
-#define BIT_LORASTATUS_SEND_FAIL 0x0200
-#define BIT_LORASTATUS_TX_RDY 0x0004
-#define BIT_LORASTATUS_RX_RDY 0x0008
-#define BIT_LORASTATUS_DEV_PROV 0x0080
-
 //
+#define LORAWAN_MAX_PAYLOAD_LEN 240
 #define LORA_KEY_LENGTH 16
 #define LORA_EUI_LENGTH 8
 
@@ -70,8 +56,7 @@ bool LoRaComponIsProvisioned(void);
 bool LoRaComponIsJoined(void);
 bool LoRaComponIsSendDone(void);
 bool LoRaComponIsSendSuccess(void);
-
-uint32_t LoRaComponGetStatus(void);
+bool LoRaComponIsIsm2400(void);
 
 //==========================================================================
 //==========================================================================

@@ -44,19 +44,9 @@ When sending a Confirmed Uplink, it will expecting a ACK being received. If not,
 
 The `LORAWAN_NOACK_RETRY_INTERVAL` control the time interval between each retry, in seconds.
 
-An example of `LORAWAN_MAX_NOACK_RETRY=3`.
+An example of `LORAWAN_MAX_NOACK_RETRY=2`.
 
 ![NoAckRetry](doc/NoAckRetry.png)
-
-
-
-## Switching Radio Chip
-
-When the LORAWAN_SW_RADIO_COUNT is greater than 0, the component will use switching the Radio chip when retrying. 
-
-An example of `LORAWAN_SW_RADIO_COUNT`=2
-
-![SwitchRadio](doc/SwitchRadio.png)
 
 
 
@@ -64,6 +54,21 @@ An example of `LORAWAN_SW_RADIO_COUNT`=2
 
 When a consecutive send fail happening, the component will treat it as a link down. Then it will start over and try to JOIN again. The `LORAWAN_LINK_FAIL_COUNT` is controlling how many consecutive fail before a link down.
 
-An example of `LORAWAN_LINK_FAIL_COUNT=5` and `LORAWAN_MAX_NOACK_RETRY=3`
+An example of `LORAWAN_LINK_FAIL_COUNT=5` and `LORAWAN_MAX_NOACK_RETRY=2`.
 
 ![LinkDown](doc/LinkDown.png)
+
+
+
+## Switching Radio Chip
+
+When the LORAWAN_SW_RADIO_COUNT is greater than 0, the component will use switching the Radio chip when retrying. 
+
+An example of `LORAWAN_SW_RADIO_COUNT=2` when joining.
+
+![SwitchRadio_Join](doc/SwitchRadio_Join.png)
+
+An example of `LORAWAN_SW_RADIO_COUNT=2` when sending data.
+
+![SwitchRadio_Data](doc/SwitchRadio_Data.png)
+
