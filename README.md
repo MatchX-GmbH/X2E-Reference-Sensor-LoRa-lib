@@ -62,13 +62,9 @@ An example of `LORAWAN_LINK_FAIL_COUNT=5` and `LORAWAN_MAX_NOACK_RETRY=2`.
 
 ## Switching Radio Chip
 
-When the LORAWAN_SW_RADIO_COUNT is greater than 0, the component will use switching the Radio chip when retrying. 
+When the LORAWAN_SW_RADIO_COUNT is greater than 0, the component will switch the Radio chip if failed to join for the specified number of times.
 
-An example of `LORAWAN_SW_RADIO_COUNT=2` when joining.
+An example of `LORAWAN_SW_RADIO_COUNT=2`.
 
 ![SwitchRadio_Join](doc/SwitchRadio_Join.png)
-
-An example of `LORAWAN_SW_RADIO_COUNT=2` when sending data.
-
-![SwitchRadio_Data](doc/SwitchRadio_Data.png)
 
