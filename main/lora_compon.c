@@ -30,6 +30,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lora_mutex_helper.h"
+#include "radio.h"
+#include "sdkconfig.h"
 #include "timer.h"
 
 //==========================================================================
@@ -44,35 +46,43 @@
 // Active LoRa Region
 #if defined(REGION_CN470)
 #define SUB_GHZ_REGION LORAMAC_REGION_CN470
-static const char *kSubGHzRegionName = "CN470";
+#define SUB_GHZ_REGION_NAME "CN470"
 #elif defined(REGION_EU868)
 #define SUB_GHZ_REGION LORAMAC_REGION_EU868
-static const char *kSubGHzRegionName = "EU868";
+#define SUB_GHZ_REGION_NAME "EU868"
 #elif defined(REGION_US915)
 #define SUB_GHZ_REGION LORAMAC_REGION_US915
-static const char *kSubGHzRegionName = "US915";
+#define SUB_GHZ_REGION_NAME "US915"
 #elif defined(REGION_KR920)
 #define SUB_GHZ_REGION LORAMAC_REGION_KR920
-static const char *kSubGHzRegionName = "KR920";
+#define SUB_GHZ_REGION_NAME "KR920"
 #elif defined(REGION_AS923)
 #define SUB_GHZ_REGION LORAMAC_REGION_AS923
-static const char *kSubGHzRegionName = "AS923";
+#define SUB_GHZ_REGION_NAME "AS923"
 #elif defined(REGION_AU915)
 #define SUB_GHZ_REGION LORAMAC_REGION_AU915
-static const char *kSubGHzRegionName = "AU915";
+#define SUB_GHZ_REGION_NAME "AU915"
 #elif defined(REGION_IN865)
 #define SUB_GHZ_REGION LORAMAC_REGION_IN865
-static const char *kSubGHzRegionName = "IN865";
+#define SUB_GHZ_REGION_NAME "IN865"
 #else
 #error "Please define the target region."
-static const char *kSubGHzRegionName = "";
+#define SUB_GHZ_REGION_NAME ""
 #endif
 
 // Kconfig
 #if defined(CONFIG_LORAWAN_PREFERRED_ISM2400)
+#define LORAWAN_PREFERRED_ISM2400 1
 #define LORAWAN_USING_ISM2400 true
 #else
+#define LORAWAN_PREFERRED_ISM2400 0
 #define LORAWAN_USING_ISM2400 false
+#endif
+
+#if defined(CONDIF_LORAWAN_PREFERRED_SUBGHZ)
+#define LORAWAN_PREFERRED_SUBGHZ 1
+#else
+#define LORAWAN_PREFERRED_SUBGHZ 0
 #endif
 
 #if defined(CONFIG_LORAWAN_DEFAULT_DATARATE)
@@ -982,7 +992,7 @@ void loraTask(void *param) {
       }
 
       case S_LORALINK_SEND_FAILURE:
-        gNakCount ++;
+        gNakCount++;
         gLinkFailCount++;
         TakeMutex();
         gTxData.retry++;
@@ -1162,7 +1172,17 @@ void LoRaComponStop(void) { gLoRaTaskAbort = true; }
 //==========================================================================
 // Get the sub-GHz region name
 //==========================================================================
-const char *LoRaComponSubGHzRegionName(void) { return kSubGHzRegionName; }
+const char *LoRaComponRegionName(void) {
+  if (LORAWAN_SW_RADIO_COUNT) {
+    return SUB_GHZ_REGION_NAME " + ISM2400";
+  } else {
+    if (LORAWAN_PREFERRED_ISM2400) {
+      return "ISM2400";
+    } else {
+      return SUB_GHZ_REGION_NAME;
+    }
+  }
+}
 
 //==========================================================================
 // Send notification bit to task
@@ -1217,6 +1237,11 @@ uint32_t LoRaComponGetWaitingTime(void) {
           waiting_time = gJoinInterval - elapsed;
         }
       }
+    } else if (state == S_LORALINK_RETRY_WAITING) {
+      uint32_t elapsed = LoRaTickElapsed(gTickLoraLink);
+      if (elapsed < LORAWAN_NOACK_RETRY_INTERVAL) {
+        waiting_time = LORAWAN_NOACK_RETRY_INTERVAL - elapsed;
+      }
     }
   }
   return waiting_time;
@@ -1225,34 +1250,24 @@ uint32_t LoRaComponGetWaitingTime(void) {
 //==========================================================================
 // Call before enter of sleep
 //==========================================================================
-void LoRaComponSleepEnter(void) {
+void LoRaComponPrepareForSleep(void) {
   TakeMutex();
   gLoraLinkState = S_LORALINK_SLEEP;
   FreeMutex();
-  // LoRaComponNotify(0, NULL);
-  // OS_DELAY_MS(10);
-  // BoardDeInitMcu();
-  // SX126xIoDeInit();  // Comment this if Vdd_rfs is using internal 3.3V LDO
-  // ExtPowerEnable(false);
+
+  RadioSx126x.Sleep();
+  RadioSx1280.Sleep();
+  LoRaBoardPrepareForSleep();
 }
 
 //==========================================================================
 // Call after exit of sleep
 //==========================================================================
-void LoRaComponSleepExit(void) {
-  // LORACOMPON_PRINTLINE("LoRaComponSleepExit()");
-  // ExtPowerInit();
-  // ExtPowerEnable(true);
-  // BoardInitMcu();
-  // OS_DELAY_MS(10);
-  // Radio.Init(NULL);  // Reinit the radio, without change the callbacks
-  // srand1(Radio.Random());
-  // Radio.SetPublicNetwork(true);
-  // Radio.Sleep();
+void LoRaComponResumeFromSleep(void) {
+  LoRaBoardResumeFromSleep();
   TakeMutex();
   gLoraLinkState = S_LORALINK_WAKEUP;
   FreeMutex();
-  //  LoRaComponNotify(0, NULL);
 }
 
 //==========================================================================

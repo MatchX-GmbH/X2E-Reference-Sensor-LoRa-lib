@@ -96,6 +96,21 @@ void SX1280HalIoIrqInit(DioIrqHandler irqHandlers) { gSx1280DioIrqHandler = irqH
 
 //==========================================================================
 //==========================================================================
+void SX1280HalDeInit(void) {
+  // if (gDevSx1280 == NULL) {
+  //   if (spi_bus_remove_device(gDevSx1280) != ESP_OK) {
+  //     printf("ERROR. SPI remove SX1280 device failed.\n");
+  //   }
+  //   gDevSx1280 = NULL;
+  // }
+  // gpio_set_direction(SX1280_SS, GPIO_MODE_INPUT);
+  // gpio_set_pull_mode(SX1280_SS, GPIO_FLOATING);
+  // gpio_set_direction(SX1280_nRES, GPIO_MODE_INPUT);
+  // gpio_set_pull_mode(SX1280_nRES, GPIO_FLOATING);
+}
+
+//==========================================================================
+//==========================================================================
 void SX1280HalReset(void) {
   DelayMs(20);
   gpio_set_level(SX1280_nRES, 0);

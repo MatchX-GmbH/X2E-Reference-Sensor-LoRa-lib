@@ -33,13 +33,13 @@ void LoRaComponHwInit(void);
 
 int8_t LoRaComponStart(void);
 void LoRaComponStop(void);
-const char *LoRaComponSubGHzRegionName(void);
+const char *LoRaComponRegionName(void);
 //void LoRaComponNotify(uint32_t aEvent, void *aCallback);
 
 bool LoRaComponIsBusy(void);
 uint32_t LoRaComponGetWaitingTime(void);
-void LoRaComponSleepEnter(void);
-void LoRaComponSleepExit(void);
+void LoRaComponPrepareForSleep(void);
+void LoRaComponResumeFromSleep(void);
 
 bool LoRaComponIsTxReady(void);
 int8_t LoRaComponSendData(const uint8_t *aData, uint16_t aLen);
