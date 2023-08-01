@@ -82,7 +82,18 @@ void SX126xIoIrqInit(DioIrqHandler dioIrq) { gSx126xDioIrqHandler = dioIrq; }
 
 //==========================================================================
 //==========================================================================
-void SX126xIoDeInit(void) {}
+void SX126xIoDeInit(void) {
+  // if (gDevSx126x == NULL) {
+  //   if (spi_bus_remove_device(gDevSx126x) != ESP_OK) {
+  //     printf("ERROR. SPI remove SX1261 device failed.\n");
+  //   }
+  //   gDevSx126x = NULL;
+  // }
+  // gpio_set_direction(SX1261_SS, GPIO_MODE_INPUT);
+  // gpio_set_pull_mode(SX1261_SS, GPIO_FLOATING);
+  // gpio_set_direction(SX1261_nRES, GPIO_MODE_INPUT);
+  // gpio_set_pull_mode(SX1261_nRES, GPIO_FLOATING);
+}
 
 //==========================================================================
 //==========================================================================

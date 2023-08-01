@@ -14,10 +14,12 @@ extern "C" {
 //==========================================================================
 //==========================================================================
 void LoRaBoardInitMcu(void);
-void LoRaBoardDeInitMcu(void);
 void LoRaBoardGetUniqueId(uint8_t *id);
 void LoRaBoardCriticalSectionBegin(void);
 void LoRaBoardCriticalSectionEnd(void);
+
+void LoRaBoardPrepareForSleep(void);
+void LoRaBoardResumeFromSleep(void);
 
 //==========================================================================
 //==========================================================================

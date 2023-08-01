@@ -38,11 +38,13 @@
 // LoRa Chip HAL Prototypes
 //==========================================================================
 void SX126xIoInit(void);
+void SX126xIoDeInit(void);
 void SX126xIoIrqInit(DioIrqHandler);
 uint32_t SX126xGetDio1PinState(void);
 void SX126xClearIrqStatus(int16_t);
 
 void SX1280HalInit(void);
+void SX1280HalDeInit(void);
 void SX1280HalIoIrqInit(DioIrqHandler);
 uint8_t SX1280HalGetDioStatus(void);
 void SX1280ClearIrqStatus(int16_t);
@@ -147,12 +149,9 @@ void LoRaBoardGetUniqueId(uint8_t* id) {
 }
 
 //==========================================================================
+// ESP timer
 //==========================================================================
-void LoRaBoardInitMcu(void) {
-  // RtcInit();
-  TimerPowerUpInit();
-
-  // Create ESP timer
+static void CreateBoardTimer(void) {
   if (gBoardTimer == NULL) {
     const esp_timer_create_args_t periodic_timer_args = {
         .callback = &PeriodicTimerFunc,
@@ -169,6 +168,24 @@ void LoRaBoardInitMcu(void) {
     esp_timer_start_periodic(gBoardTimer, 1000);
     LORAPLATFORM_PRINTLINE("Periodic timer started.");
   }
+}
+
+static void RemoveBoardTimer(void) {
+  if (gBoardTimer != NULL) {
+    esp_timer_stop(gBoardTimer);
+    LORAPLATFORM_PRINTLINE("Periodic timer stopped.");
+    gBoardTimer = NULL;
+  }
+}
+
+//==========================================================================
+//==========================================================================
+void LoRaBoardInitMcu(void) {
+  // RtcInit();
+  TimerPowerUpInit();
+
+  //
+  CreateBoardTimer();
 
   // LoRa Radio
   SX126xIoInit();
@@ -203,12 +220,20 @@ void LoRaBoardInitMcu(void) {
 
 //==========================================================================
 //==========================================================================
-void LoRaBoardDeInitMcu(void) {
-  if (gBoardTimer != NULL) {
-    esp_timer_stop(gBoardTimer);
-    LORAPLATFORM_PRINTLINE("Periodic timer stopped.");
-  }
+void LoRaBoardPrepareForSleep(void) {
+  //
+  RemoveBoardTimer();
 
-  // Clear all timer
-  TimerPowerUpInit();
+  //
+  SX126xIoDeInit();
+  SX1280HalDeInit();
+}
+
+void LoRaBoardResumeFromSleep(void) {
+  //
+  CreateBoardTimer();
+
+  //
+  SX126xIoInit();
+  SX1280HalInit();
 }
