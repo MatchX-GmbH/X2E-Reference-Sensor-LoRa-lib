@@ -29,9 +29,9 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "lora_crc.h"
 #include "lora_mutex_helper.h"
 #include "radio.h"
-#include "sdkconfig.h"
 #include "timer.h"
 
 //==========================================================================
@@ -156,10 +156,6 @@
 #define TIME_PROVISIONING_AUTHWAIT 5000
 #define TIMEOUT_SEND_WAITING 17500
 
-// Provisioning status bits
-#define BIT_PROV_HELLO_OK 0x01
-#define BIT_PROV_AUTH_OK 0x02
-
 /*!
  * Device states
  */
@@ -200,8 +196,8 @@ typedef struct {
   uint8_t NbGateways;
 } ComplianceTest_t;
 
-typedef void(loramac_cb_t)(void);
-static loramac_cb_t *gp_loramac_cb;
+// typedef void(loramac_cb_t)(void);
+// static loramac_cb_t *gp_loramac_cb;
 static TaskHandle_t gLoRaTaskHandle = NULL;
 static bool gLoRaTaskAbort;
 
@@ -224,34 +220,54 @@ static volatile uint32_t gLinkStatus;
 #define BIT_LORASTATUS_RX_RDY 0x0008
 #define BIT_LORASTATUS_DEV_PROV 0x0080
 
+// Provisioning status bits
+static uint32_t gProvisionStatus;
+#define BIT_PROV_HELLO_OK 0x01
+#define BIT_PROV_AUTH_OK 0x02
+
 //
 static uint8_t gTxBuf[LORAWAN_MAX_PAYLOAD_LEN];
 static LoraAppData_t gTxData = {.data = gTxBuf, .dataSize = -1, .port = LORAWAN_FPORT_DATA, .retry = 0};
-static bool gTxConfirmed;
-static uint16_t gUnconfigmedCount;
 
 static uint8_t gRxBuf[LORAWAN_MAX_PAYLOAD_LEN];
 static LoraAppData_t gRxData = {.data = gRxBuf, .dataSize = -1, .port = 0, .retry = 0};
 
-static uint32_t gAckCount;
-static uint32_t gNakCount;
-static uint8_t gJoinRetryTimes;
-static int16_t gLastRxRssi;
-static uint8_t gLastRxDatarate;
-static uint32_t gProvisionStatus;
-static uint32_t gLinkFailCount;
-
 static LoRaMacPrimitives_t gLoRaMacPrimitives;
 static LoRaMacCallback_t gLoRaMacCallbacks;
 
-static uint32_t gJoinInterval;
+static int16_t gLastRxRssi;
+static uint8_t gLastRxDatarate;
 
-static uint8_t gBatteryValue;
+typedef struct {
+  uint32_t ackCount;
+  uint32_t nakCount;
+  int32_t failCount;
+  uint32_t joinInterval;
+  uint8_t joinRetryTimes;
+  uint8_t batteryValue;
+  int8_t dateRate;
+  bool usingIsm2400;
+  bool txConfirmed;
+  uint16_t unconfigmedCount;
+} LoRaLinkVar_t;
+static LoRaLinkVar_t gLoRaLinkVar;
 
 static LoRaSetting_t gLoRaSetting;
 
-static int8_t gCurrentDateRate;
-static bool gUsingIsm2400;
+static bool gWakeFromSleep;
+
+// Preserved data when sleep
+#define VALUE_PRESERVED_DATA_CRC_IV 0x1234
+#define VALUE_PRESERVED_DATA_MAGIC_CODE 0x48ad3f56
+
+typedef struct {
+  uint32_t magicCode;
+  LoRaMacNvmData_t contexts;
+  LoRaLinkVar_t linkVar;
+} LoRaPreservedData_t;
+
+static RTC_DATA_ATTR LoRaPreservedData_t gLoRaPreservedData;
+static RTC_DATA_ATTR uint16_t gLoRaPreservedDataCrc;
 
 //==========================================================================
 // MAC status strings
@@ -322,7 +338,7 @@ static const char *getMacEventStatusString(uint8_t aStatus) {
 //==========================================================================
 // Battery value for MAC DevStatusReq/DevStatusAns
 //==========================================================================
-static uint8_t GetBatteryLevel(void) { return gBatteryValue; }
+static uint8_t GetBatteryLevel(void) { return gLoRaLinkVar.batteryValue; }
 
 //==========================================================================
 // ProvisioningHello
@@ -400,9 +416,9 @@ static int8_t sendFrame(void) {
   LoRaMacTxInfo_t txInfo;
 
   // Set Datarate
-  if ((!LORAWAN_ADR_ON) || (gUsingIsm2400)) {
+  if ((!LORAWAN_ADR_ON) || (gLoRaLinkVar.usingIsm2400)) {
     mibReq.Type = MIB_CHANNELS_DATARATE;
-    mibReq.Param.ChannelsDatarate = gCurrentDateRate;
+    mibReq.Param.ChannelsDatarate = gLoRaLinkVar.dateRate;
     LoRaMacMibSetRequestConfirm(&mibReq);
   }
 
@@ -419,13 +435,13 @@ static int8_t sendFrame(void) {
     return -1;
   }
 
-  if (gTxConfirmed) {
+  if ((gLoRaLinkVar.txConfirmed) && (gTxData.dataSize > 0)) {
     mcpsReq.Type = MCPS_CONFIRMED;
     mcpsReq.Req.Confirmed.fPort = gTxData.port;
     mcpsReq.Req.Confirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Confirmed.fBufferSize = gTxData.dataSize;
     //    mcpsReq.Req.Confirmed.NbTrials = g_data_send_nbtrials ? g_data_send_nbtrials : gMacConfig->nbtrials.conf + 1;
-    mcpsReq.Req.Confirmed.Datarate = gCurrentDateRate;
+    mcpsReq.Req.Confirmed.Datarate = gLoRaLinkVar.dateRate;
   } else {
     // MibRequestConfirm_t mibReq;
     // mibReq.Type = MIB_CHANNELS_NB_TRANS;
@@ -436,7 +452,7 @@ static int8_t sendFrame(void) {
     mcpsReq.Req.Unconfirmed.fPort = gTxData.port;
     mcpsReq.Req.Unconfirmed.fBuffer = gTxData.data;
     mcpsReq.Req.Unconfirmed.fBufferSize = gTxData.dataSize;
-    mcpsReq.Req.Unconfirmed.Datarate = gCurrentDateRate;
+    mcpsReq.Req.Unconfirmed.Datarate = gLoRaLinkVar.dateRate;
   }
 
   //
@@ -455,7 +471,7 @@ static int8_t sendFrame(void) {
 static void McpsConfirm(McpsConfirm_t *mcpsConfirm) {
   if (mcpsConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
     LORACOMPON_PRINTLINE("McpsConfirm() OK");
-    if (!gTxConfirmed) {
+    if (!gLoRaLinkVar.txConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
       FreeMutex();
@@ -506,9 +522,9 @@ static void McpsIndication(McpsIndication_t *mcpsIndication) {
   }
   if (mcpsIndication->AckReceived) {
     // ACK
-    gAckCount++;
-    LORACOMPON_PRINTLINE("AckReceived, gAckCount=%u", gAckCount);
-    if (gTxConfirmed) {
+    gLoRaLinkVar.ackCount++;
+    LORACOMPON_PRINTLINE("AckReceived, ackCount=%u", gLoRaLinkVar.ackCount);
+    if (gLoRaLinkVar.txConfirmed) {
       TakeMutex();
       gLinkStatus |= BIT_LORASTATUS_SEND_PASS;
       FreeMutex();
@@ -629,11 +645,11 @@ static void InitOtaa(void) {
   MibRequestConfirm_t mibReq;
 
   mibReq.Type = MIB_CHANNELS_DEFAULT_DATARATE;
-  mibReq.Param.ChannelsDefaultDatarate = gCurrentDateRate;
+  mibReq.Param.ChannelsDefaultDatarate = gLoRaLinkVar.dateRate;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_CHANNELS_DATARATE;
-  mibReq.Param.ChannelsDatarate = gCurrentDateRate;
+  mibReq.Param.ChannelsDatarate = gLoRaLinkVar.dateRate;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   // Setup Dev EUI
@@ -683,43 +699,73 @@ static void InitOtaa(void) {
 
 //==========================================================================
 //==========================================================================
+static void ProcessJoinRetry(void) {
+  if (LORAWAN_SW_RADIO_COUNT != 0) {
+    LORACOMPON_PRINTLINE("joinRetryTimes=%d", gLoRaLinkVar.joinRetryTimes);
+    gLoRaLinkVar.joinRetryTimes++;
+    if (gLoRaLinkVar.joinRetryTimes >= LORAWAN_SW_RADIO_COUNT) {
+      gLoRaLinkVar.usingIsm2400 = !gLoRaLinkVar.usingIsm2400;
+      gLoRaLinkVar.joinRetryTimes = 0;
+    }
+  }
+}
+
+//==========================================================================
+//==========================================================================
 void loraTask(void *param) {
   gLoraLinkState = S_LORALINK_INIT;
   gLastRxRssi = -999;
-  gAckCount = 0;
-  gNakCount = 0;
-  gJoinRetryTimes = 0;
-  gJoinInterval = 0;
-  gBatteryValue = BAT_LEVEL_NO_MEASURE;
+  gLoRaLinkVar.ackCount = 0;
+  gLoRaLinkVar.nakCount = 0;
+  gLoRaLinkVar.joinRetryTimes = 0;
+  gLoRaLinkVar.joinInterval = 0;
+  gLoRaLinkVar.batteryValue = BAT_LEVEL_NO_MEASURE;
   gLoRaTaskAbort = false;
-  gTxConfirmed = true;
-  gUnconfigmedCount = 0;
-  gUsingIsm2400 = LORAWAN_USING_ISM2400;
-  gCurrentDateRate = LORAWAN_DEFAULT_DATARATE;
+  gLoRaLinkVar.txConfirmed = true;
+  gLoRaLinkVar.unconfigmedCount = 0;
+  gLoRaLinkVar.usingIsm2400 = LORAWAN_USING_ISM2400;
+  gLoRaLinkVar.dateRate = LORAWAN_DEFAULT_DATARATE;
 
   //
   // ExtPowerInit();
   // ExtPowerEnable(true);
   // BoardInitMcu();
 
+  // Check wake up
+  if (gWakeFromSleep) {
+    uint16_t cal_crc =
+        LoRaCrc16Ccitt(VALUE_PRESERVED_DATA_CRC_IV, (const uint8_t *)&gLoRaPreservedData, sizeof(gLoRaPreservedData));
+    if ((gLoRaPreservedData.magicCode == VALUE_PRESERVED_DATA_MAGIC_CODE) && (cal_crc == gLoRaPreservedDataCrc)) {
+      LORACOMPON_PRINTLINE("Preserved Data CRC correct.");
+
+      // Restore Link variables
+      memcpy(&gLoRaLinkVar, &gLoRaPreservedData.linkVar, sizeof(LoRaLinkVar_t));
+    } else {
+      // Clear wake up flag
+      gWakeFromSleep = false;
+    }
+  }
+
   // Startup Delay
-  DelayMs(5000);
+  if (!gWakeFromSleep) {
+    DelayMs(5000);
+  }
 
   // start main loop of lora task.
   for (;;) {
-    uint32_t notif = 0;
+    //    uint32_t notif = 0;
 
     // Abort this task
     if (gLoRaTaskAbort) break;
 
     // Process Radio IRQ
-    if (gLoraLinkState != S_LORALINK_SLEEP) {
-      // if (Radio.IrqProcess != NULL) {
-      //   Radio.IrqProcess();
-      // }
-      // Processes the LoRaMac events
-      LoRaMacProcess();
-    }
+    //    if (gLoraLinkState != S_LORALINK_SLEEP) {
+    // if (Radio.IrqProcess != NULL) {
+    //   Radio.IrqProcess();
+    // }
+    // Processes the LoRaMac events
+    LoRaMacProcess();
+    //    }
 
     // State machine
     switch (gLoraLinkState) {
@@ -738,7 +784,7 @@ void loraTask(void *param) {
         gLoRaMacCallbacks.GetTemperatureLevel = NULL;
         gLoRaMacCallbacks.NvmDataChange = NULL;
         gLoRaMacCallbacks.MacProcessNotify = OnMacProcessNotify;
-        if (gUsingIsm2400) {
+        if (gLoRaLinkVar.usingIsm2400) {
           ret_mac = LoRaMacInitialization(&gLoRaMacPrimitives, &gLoRaMacCallbacks, LORAMAC_REGION_ISM2400);
         } else {
           ret_mac = LoRaMacInitialization(&gLoRaMacPrimitives, &gLoRaMacCallbacks, SUB_GHZ_REGION);
@@ -752,64 +798,93 @@ void loraTask(void *param) {
 
         // LoRa settings
         bool using_adr = LORAWAN_ADR_ON;
-        if (gUsingIsm2400) {
-          gCurrentDateRate = LORAWAN_ISM2400_DATARATE;
+        if (gLoRaLinkVar.usingIsm2400) {
+          gLoRaLinkVar.dateRate = LORAWAN_ISM2400_DATARATE;
           using_adr = false;
         } else {
-          gCurrentDateRate = LORAWAN_DEFAULT_DATARATE;
+          gLoRaLinkVar.dateRate = LORAWAN_DEFAULT_DATARATE;
         }
 
-        mibReq.Type = MIB_PUBLIC_NETWORK;
-        mibReq.Param.EnablePublicNetwork = LORAWAN_PUBLIC_NETWORK;
-        LoRaMacMibSetRequestConfirm(&mibReq);
+        //
+        bool device_activated = false;
+        if (gWakeFromSleep) {
+          // Clear the wake up flag
+          gWakeFromSleep = false;
 
-        mibReq.Type = MIB_ADR;
-        mibReq.Param.AdrEnable = using_adr;
-        LoRaMacMibSetRequestConfirm(&mibReq);
-        if (using_adr) {
-          LORACOMPON_PRINTLINE("ADR is ON.");
-        } else {
-          LORACOMPON_PRINTLINE("ADR is OFF.");
+          //
+          MibRequestConfirm_t mibReq;
+          mibReq.Type = MIB_NVM_CTXS;
+          if (LoRaMacMibGetRequestConfirm(&mibReq) == LORAMAC_STATUS_OK) {
+            memcpy(mibReq.Param.Contexts, &gLoRaPreservedData.contexts, sizeof(LoRaMacNvmData_t));
+            mibReq.Type = MIB_NETWORK_ACTIVATION;
+            if (LoRaMacMibGetRequestConfirm(&mibReq) == LORAMAC_STATUS_OK) {
+              if (mibReq.Param.NetworkActivation != ACTIVATION_TYPE_NONE) {
+                LORACOMPON_PRINTLINE("LoRa Activation done.");
+                device_activated = true;
+              } else {
+                ProcessJoinRetry();
+                break;
+              }
+            }
+          }
         }
+
+        //
+        if (!device_activated) {
+          mibReq.Type = MIB_PUBLIC_NETWORK;
+          mibReq.Param.EnablePublicNetwork = LORAWAN_PUBLIC_NETWORK;
+          LoRaMacMibSetRequestConfirm(&mibReq);
+
+          mibReq.Type = MIB_ADR;
+          mibReq.Param.AdrEnable = using_adr;
+          LoRaMacMibSetRequestConfirm(&mibReq);
+          if (using_adr) {
+            LORACOMPON_PRINTLINE("ADR is ON.");
+          } else {
+            LORACOMPON_PRINTLINE("ADR is OFF.");
+          }
 
 #if defined(REGION_EU868) || defined(REGION_RU864) || defined(REGION_CN779) || defined(REGION_EU433)
-        LoRaMacTestSetDutyCycleOn(LORAWAN_DUTYCYCLE_ON);
+          LoRaMacTestSetDutyCycleOn(LORAWAN_DUTYCYCLE_ON);
 #endif
 
-        // Set rx time error range
-        mibReq.Type = MIB_SYSTEM_MAX_RX_ERROR;
-        mibReq.Param.SystemMaxRxError = 50;  // Increase this could make the RX window open earlier.
-                                             // Warning: Since there is a limitation on the RX widnow,
-                                             //          a too large value will cause the window shifted
-                                             //          to early and missed the signal.
-        LoRaMacMibSetRequestConfirm(&mibReq);
-
-        if (gUsingIsm2400) {
-          // Set Channels mask, forced to using CH0
-          uint16_t ch_mask[6] = {0x0001, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
-          mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
-          mibReq.Param.ChannelsDefaultMask = ch_mask;
+          // Set rx time error range
+          mibReq.Type = MIB_SYSTEM_MAX_RX_ERROR;
+          mibReq.Param.SystemMaxRxError = 50;  // Increase this could make the RX window open earlier.
+                                               // Warning: Since there is a limitation on the RX widnow,
+                                               //          a too large value will cause the window shifted
+                                               //          to early and missed the signal.
           LoRaMacMibSetRequestConfirm(&mibReq);
-        } else {
+
+          if (gLoRaLinkVar.usingIsm2400) {
+            // Set Channels mask, forced to using CH0
+            uint16_t ch_mask[6] = {0x0001, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
+            mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
+            mibReq.Param.ChannelsDefaultMask = ch_mask;
+            LoRaMacMibSetRequestConfirm(&mibReq);
+          } else {
 #if defined(REGION_US915)
-          // Set Channels mask
-          uint16_t ch_mask[6] = {0xff00, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
-          mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
-          mibReq.Param.ChannelsDefaultMask = ch_mask;
-          LoRaMacMibSetRequestConfirm(&mibReq);
+            // Set Channels mask
+            uint16_t ch_mask[6] = {0xff00, 0x0000, 0x0000, 0x0000, 0x0001, 0x0000};
+            mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
+            mibReq.Param.ChannelsDefaultMask = ch_mask;
+            LoRaMacMibSetRequestConfirm(&mibReq);
 #endif
+          }
+
+          // Init variables
+          gLoRaLinkVar.txConfirmed = true;
+          gLoRaLinkVar.unconfigmedCount = 0;
+          TakeMutex();
+          gLinkStatus = 0;
+          gLoRaLinkVar.failCount = 0;
+          gTxData.dataSize = -1;  // Ready for TX
+          gRxData.dataSize = -1;  // Ready for RX
+          FreeMutex();
         }
 
         LoRaMacStart();
 
-        gTxConfirmed = true;
-        gUnconfigmedCount = 0;
-        TakeMutex();
-        gLinkStatus = 0;
-        gLinkFailCount = 0;
-        gTxData.dataSize = -1;  // Ready for TX
-        gRxData.dataSize = -1;  // Ready for RX
-        FreeMutex();
 #if mx_configUSE_DEVICE_PROVISIONING
         if (gLoRaSetting.provisionDone) {
           LORACOMPON_PRINTLINE("Device is provisioned.");
@@ -818,15 +893,20 @@ void loraTask(void *param) {
           gLinkStatus |= BIT_LORASTATUS_DEV_PROV;
           gLoraLinkState = S_LORALINK_PROVISIONING_START;
           gTickLoraLink = 0;
-          gJoinInterval = TIME_PROV_INTERVAL_MIN;
+          gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN;
         }
 #else
-        gLoraLinkState = S_LORALINK_JOIN;
+        if (device_activated) {
+          gLinkStatus |= BIT_LORASTATUS_JOIN_PASS;
+          gLoraLinkState = S_LORALINK_JOINED;
+        } else {
+          gLoraLinkState = S_LORALINK_JOIN;
+        }
 #endif
         break;
       }
       case S_LORALINK_PROVISIONING_START:
-        // if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gJoinInterval)) {
+        // if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval)) {
         //   gProvisionStatus = 0;
         //   InitDevProvision();
         //   ProvisioningHello();
@@ -838,7 +918,7 @@ void loraTask(void *param) {
       case S_LORALINK_PROVISIONING_HELLO:
         // if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
         //   gLoraLinkState = S_LORALINK_PROVISIONING_START;
-        //   gJoinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
+        //   gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
         //   gTickLoraLink = LoRaGetTick();
         // } else if ((gProvisionStatus & BIT_PROV_HELLO_OK) != 0) {
         //   DevProvisionGenKeys();
@@ -858,7 +938,7 @@ void loraTask(void *param) {
       case S_LORALINK_PROVISIONING_WAIT:
         // if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
         //   gLoraLinkState = S_LORALINK_PROVISIONING_START;
-        //   gJoinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
+        //   gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
         //   gTickLoraLink = LoRaGetTick();
         // } else if ((gProvisionStatus & BIT_PROV_AUTH_OK) != 0) {
         //   LORACOMPON_PRINTLINE("  Provisioning the device.");
@@ -884,7 +964,7 @@ void loraTask(void *param) {
         //
         MlmeReq_t mlmeReq;
         mlmeReq.Type = MLME_JOIN;
-        if (gUsingIsm2400) {
+        if (gLoRaLinkVar.usingIsm2400) {
           mlmeReq.Req.Join.Datarate = LORAWAN_ISM2400_DATARATE;
         } else {
           mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
@@ -898,7 +978,7 @@ void loraTask(void *param) {
         }
 
         gLoraLinkState = S_LORALINK_JOIN_WAIT;
-        gJoinInterval = randr(TIME_JOIN_INTERVAL_MIN, TIME_JOIN_INTERVAL_MAX);
+        gLoRaLinkVar.joinInterval = randr(TIME_JOIN_INTERVAL_MIN, TIME_JOIN_INTERVAL_MAX);
         gTickLoraLink = LoRaGetTick();
         break;
       }
@@ -907,18 +987,11 @@ void loraTask(void *param) {
         TakeMutex();
         uint32_t status = gLinkStatus;
         FreeMutex();
-        if (status & BIT_LORASTATUS_JOIN_PASS) {
-          gJoinRetryTimes = 0;
+        if ((status & BIT_LORASTATUS_JOIN_PASS) != 0) {
+          gLoRaLinkVar.joinRetryTimes = 0;
           gLoraLinkState = S_LORALINK_JOINED;
-        } else if (LoRaTickElapsed(gTickLoraLink) >= gJoinInterval) {
-          if (LORAWAN_SW_RADIO_COUNT != 0) {
-            LORACOMPON_PRINTLINE("gJoinRetryTimes=%d", gJoinRetryTimes);
-            gJoinRetryTimes++;
-            if (gJoinRetryTimes >= LORAWAN_SW_RADIO_COUNT) {
-              gUsingIsm2400 = !gUsingIsm2400;
-              gJoinRetryTimes = 0;
-            }
-          }
+        } else if (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval) {
+          ProcessJoinRetry();
           gLoraLinkState = S_LORALINK_INIT;
         }
         break;
@@ -938,22 +1011,6 @@ void loraTask(void *param) {
           gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
           FreeMutex();
         }
-        // gTxData.retry ++;
-        // if (gTxData.retry > 0) {
-        //   LORACOMPON_PRINTLINE("TX failed. retry=%d", gTxData.retry);
-        // } else {
-        //   // TX dropped
-        //   LORACOMPON_PRINTLINE("TX dropped.");
-        //   gTxData.dataSize = 0;
-        //   TakeMutex();
-        //   gLinkStatus |= BIT_LORASTATUS_SEND_FAIL;
-        //   gLinkFailCount++;
-        //   FreeMutex();
-        // }
-        // gLoraLinkState = S_LORALINK_WAITING;
-        // } else {
-        //   gLoraLinkState = S_LORALINK_SEND_WAITING;
-        // }
         gLoraLinkState = S_LORALINK_SEND_WAITING;
         gTickLoraLink = LoRaGetTick();
         break;
@@ -992,12 +1049,18 @@ void loraTask(void *param) {
       }
 
       case S_LORALINK_SEND_FAILURE:
-        gNakCount++;
-        gLinkFailCount++;
+        gLoRaLinkVar.nakCount++;
+        if (LORAWAN_LINK_FAIL_COUNT) {
+          gLoRaLinkVar.failCount++;
+          LORACOMPON_PRINTLINE("failCount=%d", gLoRaLinkVar.failCount);
+        }
+        else {
+          gLoRaLinkVar.failCount = -1;
+        }
         TakeMutex();
         gTxData.retry++;
         FreeMutex();
-        if ((gTxData.retry <= LORAWAN_MAX_NOACK_RETRY) && (gLinkFailCount < LORAWAN_LINK_FAIL_COUNT)) {
+        if ((gTxData.retry <= LORAWAN_MAX_NOACK_RETRY) && (gLoRaLinkVar.failCount < LORAWAN_LINK_FAIL_COUNT)) {
           // Do retry
           TakeMutex();
           gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
@@ -1018,13 +1081,13 @@ void loraTask(void *param) {
         TakeMutex();
         gTxData.dataSize = -1;  // End of TX
         FreeMutex();
-        gLinkFailCount = 0;
-        if (gUnconfigmedCount >= LORAWAN_UNCONFIRMED_COUNT) {
-          gUnconfigmedCount = 0;
-          gTxConfirmed = true;
+        gLoRaLinkVar.failCount = 0;
+        if (gLoRaLinkVar.unconfigmedCount >= LORAWAN_UNCONFIRMED_COUNT) {
+          gLoRaLinkVar.unconfigmedCount = 0;
+          gLoRaLinkVar.txConfirmed = true;
         } else {
-          gUnconfigmedCount++;
-          gTxConfirmed = false;
+          gLoRaLinkVar.unconfigmedCount++;
+          gLoRaLinkVar.txConfirmed = false;
         }
         gTickLoraLink = LoRaGetTick();
         gLoraLinkState = S_LORALINK_WAITING;
@@ -1032,7 +1095,7 @@ void loraTask(void *param) {
 
       case S_LORALINK_RETRY_WAITING:
         if (LoRaTickElapsed(gTickLoraLink) >= LORAWAN_NOACK_RETRY_INTERVAL) {
-          LORACOMPON_PRINTLINE("Retry %d, gNakCount=%d", gTxData.retry, gNakCount);
+          LORACOMPON_PRINTLINE("Retry %d, nakCount=%d", gTxData.retry, gLoRaLinkVar.nakCount);
           gLoraLinkState = S_LORALINK_SEND;
         }
         break;
@@ -1045,7 +1108,7 @@ void loraTask(void *param) {
         if (status & BIT_LORASTATUS_JOIN_PASS) {
           if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= TIME_TXCHK_INTERVAL)) {
             gTickLoraLink = LoRaGetTick();
-            if (gLinkFailCount >= LORAWAN_LINK_FAIL_COUNT) {
+            if (gLoRaLinkVar.failCount >= LORAWAN_LINK_FAIL_COUNT) {
               printf("ERROR. Too many link fail. Disconnect.\n");
               gLoraLinkState = S_LORALINK_INIT;
             } else if ((tx_len >= 0) && (!LoRaMacIsBusy())) {
@@ -1133,7 +1196,7 @@ void LoRaComponHwInit(void) { LoRaBoardInitMcu(); }
 //==========================================================================
 // Start the LoRa
 //==========================================================================
-int8_t LoRaComponStart(void) {
+int8_t LoRaComponStart(bool aWakeFromSleep) {
   //
   InitMutex();
 
@@ -1154,6 +1217,9 @@ int8_t LoRaComponStart(void) {
   memset(gLoRaSetting.joinEui, 0x00, LORA_EUI_LENGTH);
   memset(gLoRaSetting.nwkKey, 0x01, LORA_KEY_LENGTH);
   memset(gLoRaSetting.appKey, 0x02, LORA_KEY_LENGTH);
+
+  //
+  gWakeFromSleep = aWakeFromSleep;
 
   // Create task
   if (xTaskCreate(loraTask, "LoRaTask", 4096, NULL, TASK_PRIO_GENERAL, &gLoRaTaskHandle) != pdPASS) {
@@ -1222,19 +1288,15 @@ uint32_t LoRaComponGetWaitingTime(void) {
   int16_t tx_len = gTxData.dataSize;
   FreeMutex();
   if (!LoRaMacIsBusy()) {
-    waiting_time = UINT32_MAX;
-    if (gTickLoraLink == 0) {
-      waiting_time = 0;
-    } else if ((state == S_LORALINK_WAITING) && (tx_len >= 0)) {
-      uint32_t elapsed = LoRaTickElapsed(gTickLoraLink);
-      if (elapsed < TIME_TXCHK_INTERVAL) {
-        waiting_time = TIME_TXCHK_INTERVAL - elapsed;
+    if (state == S_LORALINK_WAITING) {
+      if ((gTickLoraLink != 0) && (tx_len < 0)) {
+        waiting_time = UINT32_MAX;
       }
     } else if ((state == S_LORALINK_JOIN_WAIT) || (state == S_LORALINK_PROVISIONING_START)) {
-      if (gJoinInterval > 0) {
+      if (gLoRaLinkVar.joinInterval > 0) {
         uint32_t elapsed = LoRaTickElapsed(gTickLoraLink);
-        if (elapsed < gJoinInterval) {
-          waiting_time = gJoinInterval - elapsed;
+        if (elapsed < gLoRaLinkVar.joinInterval) {
+          waiting_time = gLoRaLinkVar.joinInterval - elapsed;
         }
       }
     } else if (state == S_LORALINK_RETRY_WAITING) {
@@ -1250,11 +1312,40 @@ uint32_t LoRaComponGetWaitingTime(void) {
 //==========================================================================
 // Call before enter of sleep
 //==========================================================================
-void LoRaComponPrepareForSleep(void) {
+void LoRaComponPrepareForSleep(bool aDeepSleep) {
   TakeMutex();
   gLoraLinkState = S_LORALINK_SLEEP;
   FreeMutex();
 
+  if (aDeepSleep) {
+    if (LoRaMacQueryMacCommandsSize() > 0) {
+      // Send a blank frame if some MAC command is waiting to send
+      gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
+      gTxData.data[0] = 0;
+      gTxData.dataSize = 0;
+      gTxData.port = LORAWAN_FPORT_DATA;
+      gTxData.retry = 0;
+      gTickLoraLink = 0;
+      LORACOMPON_PRINTLINE("Send a blank frame.");
+      if (sendFrame() >= 0) {
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+      }
+    }
+
+    // Save data to preserve area
+    MibRequestConfirm_t mibReq;
+    mibReq.Type = MIB_NVM_CTXS;
+    if (LoRaMacMibGetRequestConfirm(&mibReq) == LORAMAC_STATUS_OK) {
+      gLoRaPreservedData.magicCode = VALUE_PRESERVED_DATA_MAGIC_CODE;
+      memcpy(&gLoRaPreservedData.contexts, mibReq.Param.Contexts, sizeof(LoRaMacNvmData_t));
+      memcpy(&gLoRaPreservedData.linkVar, &gLoRaLinkVar, sizeof(LoRaLinkVar_t));
+      gLoRaPreservedDataCrc =
+          LoRaCrc16Ccitt(VALUE_PRESERVED_DATA_CRC_IV, (const uint8_t *)&gLoRaPreservedData, sizeof(gLoRaPreservedData));
+      LORACOMPON_PRINTLINE("Preserved Data CRC=%04X", gLoRaPreservedDataCrc);
+    }
+  }
+
+  //
   RadioSx126x.Sleep();
   RadioSx1280.Sleep();
   LoRaBoardPrepareForSleep();
@@ -1363,7 +1454,7 @@ int32_t LoRaComponGetData(uint8_t *aData, uint16_t aDataSize, LoRaRxInfo_t *aInf
 //==========================================================================
 void LoRaComponSetDatarate(int8_t aValue) {
   TakeMutex();
-  gCurrentDateRate = aValue;
+  gLoRaLinkVar.dateRate = aValue;
   FreeMutex();
 }
 
@@ -1372,19 +1463,19 @@ void LoRaComponSetDatarate(int8_t aValue) {
 //==========================================================================
 void LoRaComponSetBatteryPercent(float aValue) {
   if (isnan(aValue)) {
-    gBatteryValue = BAT_LEVEL_NO_MEASURE;
+    gLoRaLinkVar.batteryValue = BAT_LEVEL_NO_MEASURE;
   } else if (aValue >= 100) {
-    gBatteryValue = BAT_LEVEL_FULL;
+    gLoRaLinkVar.batteryValue = BAT_LEVEL_FULL;
   } else if (aValue <= 0) {
-    gBatteryValue = BAT_LEVEL_EMPTY;
+    gLoRaLinkVar.batteryValue = BAT_LEVEL_EMPTY;
   } else {
     aValue = (aValue / 100) * (BAT_LEVEL_FULL - BAT_LEVEL_EMPTY);
     aValue += 0.5;
-    gBatteryValue = (uint8_t)aValue;
+    gLoRaLinkVar.batteryValue = (uint8_t)aValue;
   }
 }
 
-void LoRaComponSetExtPower(void) { gBatteryValue = BAT_LEVEL_EXT_SRC; }
+void LoRaComponSetExtPower(void) { gLoRaLinkVar.batteryValue = BAT_LEVEL_EXT_SRC; }
 
 //==========================================================================
 // Check status
@@ -1397,4 +1488,4 @@ bool LoRaComponIsSendSuccess(void) { return ((GetStatus() & BIT_LORASTATUS_SEND_
 
 bool LoRaComponIsSendDone(void) { return ((GetStatus() & BIT_LORASTATUS_TX_RDY) != 0); }
 
-bool LoRaComponIsIsm2400(void) { return gUsingIsm2400; }
+bool LoRaComponIsIsm2400(void) { return gLoRaLinkVar.usingIsm2400; }

@@ -2932,6 +2932,9 @@ LoRaMacStatus_t LoRaMacDeInitialization( void );
  */
 void LoRaMacReset( void );
 
+//
+int32_t LoRaMacQueryMacCommandsSize(void);
+
 /*! \} defgroup LORAMAC */
 
 #ifdef __cplusplus

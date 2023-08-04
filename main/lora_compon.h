@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "sdkconfig.h"
+
 //==========================================================================
 //==========================================================================
 //
@@ -31,14 +33,14 @@ typedef struct {
 //==========================================================================
 void LoRaComponHwInit(void);
 
-int8_t LoRaComponStart(void);
+int8_t LoRaComponStart(bool aWakeFromSleep);
 void LoRaComponStop(void);
 const char *LoRaComponRegionName(void);
 //void LoRaComponNotify(uint32_t aEvent, void *aCallback);
 
 bool LoRaComponIsBusy(void);
 uint32_t LoRaComponGetWaitingTime(void);
-void LoRaComponPrepareForSleep(void);
+void LoRaComponPrepareForSleep(bool aDeepSleep);
 void LoRaComponResumeFromSleep(void);
 
 bool LoRaComponIsTxReady(void);
