@@ -3985,6 +3985,18 @@ LoRaMacStatus_t LoRaMacStop( void )
     return LORAMAC_STATUS_BUSY;
 }
 
+int32_t LoRaMacQueryMacCommandsSize(void) {
+    size_t macCmdsSize = 0;
+    if( LoRaMacCommandsGetSizeSerializedCmds( &macCmdsSize ) != LORAMAC_COMMANDS_SUCCESS )
+    {
+        return -1;
+    }
+    else
+    {
+        return macCmdsSize;
+    }
+}
+
 LoRaMacStatus_t LoRaMacQueryTxPossible( uint8_t size, LoRaMacTxInfo_t* txInfo )
 {
     CalcNextAdrParams_t adrNext;
