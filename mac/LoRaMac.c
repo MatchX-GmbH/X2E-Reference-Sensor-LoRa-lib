@@ -1070,6 +1070,10 @@ static void ProcessRadioRxDone( void )
                 // Apply the last tx channel
                 applyCFList.JoinChannel = MacCtx.Channel;
 
+                if (applyCFList.Size > 0) {
+                    LORAMAC_HEX2STRING("CFList: ", applyCFList.Payload, applyCFList.Size);
+                }
+
                 RegionApplyCFList( Nvm.MacGroup2.Region, &applyCFList );
 
                 Nvm.MacGroup2.NetworkActivation = ACTIVATION_TYPE_OTAA;
@@ -3007,6 +3011,7 @@ static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx )
 
     // Select channel
     status = RegionNextChannel( Nvm.MacGroup2.Region, &nextChan, &MacCtx.Channel, &MacCtx.DutyCycleWaitTime, &Nvm.MacGroup1.AggregatedTimeOff );
+    Radio.SetPublicNetwork( Nvm.MacGroup2.PublicNetwork );  // May changed to FSK mode, set the LoRa again.
 
     if( status != LORAMAC_STATUS_OK )
     {
@@ -5527,7 +5532,7 @@ LoRaMacStatus_t LoRaMacMcpsRequest( McpsReq_t* mcpsRequest )
     memset1( ( uint8_t* ) &MacCtx.McpsConfirm, 0, sizeof( MacCtx.McpsConfirm ) );
     MacCtx.McpsConfirm.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
 
-    // Apply confirmed downlinks, if the device has not received a valid
+    // Apply confirmed uplinks, if the device has not received a valid
     // downlink after a join accept.
     if( ( Nvm.MacGroup2.NetworkActivation == ACTIVATION_TYPE_OTAA ) &&
         ( Nvm.MacGroup2.DeviceClass == CLASS_C ) &&

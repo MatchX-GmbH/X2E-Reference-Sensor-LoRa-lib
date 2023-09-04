@@ -31,6 +31,7 @@
 #include "radio.h"
 #include "RegionCommon.h"
 #include "RegionAS923.h"
+#include "LoRaMac_debug.h"
 
 // Definitions
 #define CHANNELS_MASK_SIZE                1
@@ -736,6 +737,7 @@ bool RegionAS923TxConfig( TxConfigParams_t* txConfig, int8_t* txPower, TimerTime
     phyTxPower = RegionCommonComputeTxPower( txPowerLimited, txConfig->MaxEirp, txConfig->AntennaGain );
 
     // Setup the radio frequency
+    LORAMAC_PRINTLINE("Tx CH=%d, Freq=%u", txConfig->Channel, RegionNvmGroup2->Channels[txConfig->Channel].Frequency);
     Radio.SetChannel( RegionNvmGroup2->Channels[txConfig->Channel].Frequency );
 
     if( txConfig->Datarate == DR_7 )

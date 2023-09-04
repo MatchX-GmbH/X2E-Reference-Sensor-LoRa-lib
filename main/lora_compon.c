@@ -428,11 +428,22 @@ static int8_t sendFrame(void) {
     // LORACOMPON_PRINTLINE("CurrentPossiblePayloadSize=%d", txInfo.CurrentPossiblePayloadSize);
     // LORACOMPON_PRINTLINE("MaxPossibleApplicationDataSize=%d", txInfo.MaxPossibleApplicationDataSize);
     if (ret_mac == LORAMAC_STATUS_LENGTH_ERROR) {
-      printf("ERROR. Payload is too large at current datarate. Max is %d.\n", txInfo.CurrentPossiblePayloadSize);
+      uint8_t max_size = txInfo.CurrentPossiblePayloadSize;
+      // Try set datarate
+      LORACOMPON_PRINTLINE("Payload too large, try default DR%d", gLoRaLinkVar.dateRate);
+      mibReq.Type = MIB_CHANNELS_DATARATE;
+      mibReq.Param.ChannelsDatarate = gLoRaLinkVar.dateRate;
+      LoRaMacMibSetRequestConfirm(&mibReq);
+      if (LoRaMacQueryTxPossible(gTxData.dataSize, &txInfo) != LORAMAC_STATUS_OK) {
+        printf("ERROR. Payload is too large at current datarate. Max is %d.\n", txInfo.CurrentPossiblePayloadSize);
+        return -1;
+      }
+      printf("WARNING. Changed to default DR%d due to data size>%d\n", gLoRaLinkVar.dateRate, max_size);
+
     } else {
       printf("ERROR. LoRaMacQueryTxPossible() failed, %s\n", getMacStatusString(ret_mac));
+      return -1;
     }
-    return -1;
   }
 
   if ((gLoRaLinkVar.txConfirmed) && (gTxData.dataSize > 0)) {
@@ -1322,7 +1333,7 @@ void LoRaComponPrepareForSleep(bool aDeepSleep) {
       // Send a blank frame if some MAC command is waiting to send
       gLinkStatus &= ~(BIT_LORASTATUS_SEND_PASS | BIT_LORASTATUS_SEND_FAIL);
       gTxData.data[0] = 0;
-      gTxData.dataSize = 0;
+      gTxData.dataSize = 1;
       gTxData.port = LORAWAN_FPORT_DATA;
       gTxData.retry = 0;
       gTickLoraLink = 0;

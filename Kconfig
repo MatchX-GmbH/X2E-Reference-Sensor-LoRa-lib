@@ -79,6 +79,12 @@ menu "LoRaWAN"
         config LORAWAN_REGION_US915
             bool "US915 - For USA"
 
+        config LORAWAN_REGION_KR920
+            bool "KR920 - For South Korea"
+            
+        config LORAWAN_REGION_AS923
+            bool "AS923 - Used in multiple Asian countries"
+
     endchoice # LORAWAN_SUBGHZ_REGION
 
     config LORACOMPON_DEBUG

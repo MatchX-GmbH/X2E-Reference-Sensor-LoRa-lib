@@ -32,6 +32,7 @@
 #include "RegionCommon.h"
 #include "RegionUS915.h"
 #include "RegionBaseUS.h"
+#include "LoRaMac_debug.h"
 
 // Definitions
 #define CHANNELS_MASK_SIZE              6
@@ -552,6 +553,7 @@ bool RegionUS915TxConfig( TxConfigParams_t* txConfig, int8_t* txPower, TimerTime
     phyTxPower = RegionCommonComputeTxPower( txPowerLimited, US915_DEFAULT_MAX_ERP, 0 );
 
     // Setup the radio frequency
+    LORAMAC_PRINTLINE("Tx CH=%d, Freq=%u", txConfig->Channel, RegionNvmGroup2->Channels[txConfig->Channel].Frequency);
     Radio.SetChannel( RegionNvmGroup2->Channels[txConfig->Channel].Frequency );
 
     Radio.SetTxConfig( MODEM_LORA, phyTxPower, 0, bandwidth, phyDr, 1, 8, false, true, 0, 0, false, 4000 );

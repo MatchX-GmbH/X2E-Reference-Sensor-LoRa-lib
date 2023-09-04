@@ -20,6 +20,19 @@ if(CONFIG_LORAWAN_REGION_US915)
   list(APPEND defines REGION_US915)
 endif()
 
+if(CONFIG_LORAWAN_REGION_KR920)
+  list(APPEND src_dirs "mac/region/KR920")
+  list(APPEND inc_dirs "mac/region/KR920")
+  list(APPEND defines REGION_KR920)
+endif()
+
+if(CONFIG_LORAWAN_REGION_AS923)
+  list(APPEND src_dirs "mac/region/AS923")
+  list(APPEND inc_dirs "mac/region/AS923")
+  list(APPEND defines REGION_AS923)
+endif()
+
+
 #
 idf_component_register(SRC_DIRS "${src_dirs}"
                     INCLUDE_DIRS "${inc_dirs}")
