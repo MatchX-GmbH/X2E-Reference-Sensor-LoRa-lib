@@ -35,6 +35,7 @@
 #include "RegionCN470B20.h"
 #include "RegionCN470A26.h"
 #include "RegionCN470B26.h"
+#include "LoRaMac_debug.h"
 
 // Definitions
 #define CHANNELS_MASK_SIZE              6
@@ -50,6 +51,8 @@
 
 
 ChannelParams_t CommonJoinChannels[] = CN470_COMMON_JOIN_CHANNELS;
+#define DEFAULT_CHIRPSTACK_RX2_FREQ 505300000
+
 
 /*!
  * Definition of the regional channel plan.
@@ -746,12 +749,18 @@ bool RegionCN470RxConfig( RxConfigParams_t* rxConfig, int8_t* datarate )
     {
         // In this case, only RX_SLOT_WIN_1 and RX_SLOT_WIN_2 is possible. There is
         // no need to verify it. The end device is not joined and is an OTAA device.
-        frequency = CommonJoinChannels[rxConfig->Channel].Rx1Frequency;
+        if( rxConfig->RxSlot == RX_SLOT_WIN_2 ) {
+            frequency = DEFAULT_CHIRPSTACK_RX2_FREQ;
+        }
+        else {
+            frequency = CommonJoinChannels[rxConfig->Channel].Rx1Frequency;
+        }
     }
 
     // Read the physical datarate from the datarates table
     phyDr = DataratesCN470[dr];
 
+    LORAMAC_PRINTLINE("Rx CH=%d, Freq=%u", rxConfig->Channel, frequency);
     Radio.SetChannel( frequency );
 
     // Radio configuration
@@ -770,12 +779,19 @@ bool RegionCN470TxConfig( TxConfigParams_t* txConfig, int8_t* txPower, TimerTime
     int8_t txPowerLimited = RegionCommonLimitTxPower( txConfig->TxPower, RegionBands[RegionNvmGroup2->Channels[txConfig->Channel].Band].TxMaxPower );
     uint32_t bandwidth = RegionCommonGetBandwidth( txConfig->Datarate, BandwidthsCN470 );
     int8_t phyTxPower = 0;
+    uint32_t frequency = RegionNvmGroup2->Channels[txConfig->Channel].Frequency;
+
+    // If not join, set freq on join channel table
+    if (txConfig->NetworkActivation == ACTIVATION_TYPE_NONE) {
+        frequency = CommonJoinChannels[txConfig->Channel].Frequency;
+    }
 
     // Calculate physical TX power
     phyTxPower = RegionCommonComputeTxPower( txPowerLimited, txConfig->MaxEirp, txConfig->AntennaGain );
 
     // Setup the radio frequency
-    Radio.SetChannel( RegionNvmGroup2->Channels[txConfig->Channel].Frequency );
+    LORAMAC_PRINTLINE("Tx CH=%d, Freq=%u", txConfig->Channel, frequency);
+    Radio.SetChannel( frequency );
 
     if( txConfig->Datarate == DR_7 )
     { // High Speed FSK channel

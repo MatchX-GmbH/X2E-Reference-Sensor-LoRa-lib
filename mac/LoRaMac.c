@@ -3411,6 +3411,7 @@ LoRaMacStatus_t SendFrameOnChannel( uint8_t channel )
     txConfig.MaxEirp = Nvm.MacGroup2.MacParams.MaxEirp;
     txConfig.AntennaGain = Nvm.MacGroup2.MacParams.AntennaGain;
     txConfig.PktLen = MacCtx.PktBufferLen;
+    txConfig.NetworkActivation = Nvm.MacGroup2.NetworkActivation;
 
     RegionTxConfig( Nvm.MacGroup2.Region, &txConfig, &txPower, &MacCtx.TxTimeOnAir );
 

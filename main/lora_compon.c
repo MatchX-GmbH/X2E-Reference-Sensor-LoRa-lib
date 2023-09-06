@@ -979,6 +979,12 @@ void loraTask(void *param) {
           mlmeReq.Req.Join.Datarate = LORAWAN_ISM2400_DATARATE;
         } else {
           mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
+          if (!gLoRaLinkVar.usingIsm2400) {
+            #if defined (REGION_CN470)
+            // DR0 is unavailable for devices implementing CN470-510 
+            if (mlmeReq.Req.Join.Datarate == DR_0) mlmeReq.Req.Join.Datarate = DR_1;
+            #endif
+          }
         }
         mlmeReq.Req.Join.NetworkActivation = ACTIVATION_TYPE_OTAA;
 

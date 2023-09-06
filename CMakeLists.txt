@@ -32,6 +32,11 @@ if(CONFIG_LORAWAN_REGION_AS923)
   list(APPEND defines REGION_AS923)
 endif()
 
+if(CONFIG_LORAWAN_REGION_CN470)
+  list(APPEND src_dirs "mac/region/CN470")
+  list(APPEND inc_dirs "mac/region/CN470")
+  list(APPEND defines REGION_CN470)
+endif()
 
 #
 idf_component_register(SRC_DIRS "${src_dirs}"

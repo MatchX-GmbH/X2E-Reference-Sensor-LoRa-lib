@@ -220,7 +220,8 @@ extern "C"
 
 #define CN470_COMMON_JOIN_CHANNELS_SIZE             20
 
-#define CN470_JOIN_CHANNELS                         { 0xFFFF, 0x000F }
+//#define CN470_JOIN_CHANNELS                         { 0xFFFF, 0x000F }
+#define CN470_JOIN_CHANNELS                         { 0x0008, 0x0000 }
 
 /*!
  * Data rates table definition

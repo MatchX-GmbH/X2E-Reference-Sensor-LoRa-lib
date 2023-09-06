@@ -85,6 +85,9 @@ menu "LoRaWAN"
         config LORAWAN_REGION_AS923
             bool "AS923 - Used in multiple Asian countries"
 
+        config LORAWAN_REGION_CN470
+            bool "CN470 - For China"
+
     endchoice # LORAWAN_SUBGHZ_REGION
 
     config LORACOMPON_DEBUG
