@@ -90,6 +90,10 @@ menu "LoRaWAN"
 
     endchoice # LORAWAN_SUBGHZ_REGION
 
+    config LORAWAN_DEV_PROVISIONING
+        bool "Use MatchX Device Provisioning"
+        default y
+
     config LORACOMPON_DEBUG
         bool "Show component debug message"
         default n

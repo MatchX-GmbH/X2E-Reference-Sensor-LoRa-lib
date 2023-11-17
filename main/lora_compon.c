@@ -24,12 +24,14 @@
 #include "LoRaCompon_debug.h"
 #include "LoRaMac.h"
 #include "board.h"
+#include "dev_provision.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lora_crc.h"
+#include "lora_data.h"
 #include "lora_mutex_helper.h"
 #include "radio.h"
 #include "timer.h"
@@ -119,6 +121,12 @@
 #define LORAWAN_UNCONFIRMED_COUNT CONFIG_LORAWAN_UNCONFIRMED_COUNT
 #else
 #define LORAWAN_UNCONFIRMED_COUNT 0
+#endif
+
+#if defined(CONFIG_LORAWAN_DEV_PROVISIONING)
+#define LORAWAN_DEV_PROVISIONING 1
+#else
+#define LORAWAN_DEV_PROVISIONING 0
 #endif
 
 //
@@ -218,7 +226,6 @@ static volatile uint32_t gLinkStatus;
 #define BIT_LORASTATUS_SEND_FAIL 0x0200
 #define BIT_LORASTATUS_TX_RDY 0x0004
 #define BIT_LORASTATUS_RX_RDY 0x0008
-#define BIT_LORASTATUS_DEV_PROV 0x0080
 
 // Provisioning status bits
 static uint32_t gProvisionStatus;
@@ -252,7 +259,7 @@ typedef struct {
 } LoRaLinkVar_t;
 static LoRaLinkVar_t gLoRaLinkVar;
 
-static LoRaSetting_t gLoRaSetting;
+static LoRaSettings_t gLoRaSettings;
 
 static bool gWakeFromSleep;
 
@@ -264,6 +271,8 @@ typedef struct {
   uint32_t magicCode;
   LoRaMacNvmData_t contexts;
   LoRaLinkVar_t linkVar;
+  char provisionId[32];
+  uint8_t provisionIdHash[32];
 } LoRaPreservedData_t;
 
 static RTC_DATA_ATTR LoRaPreservedData_t gLoRaPreservedData;
@@ -346,32 +355,32 @@ static uint8_t GetBatteryLevel(void) { return gLoRaLinkVar.batteryValue; }
 static void ProvisioningHello(void) {
   LORACOMPON_PRINTLINE("ProvisioningHello()");
 
-  // //
-  // LoRaMacStatus_t status;
-  // MlmeReq_t mlmeReq;
-  // mlmeReq.Type = MLME_PROPRIETARY;
-  // mlmeReq.Req.Proprietary.Datarate = LORAWAN_HELLO_DATARATE;
+  //
+  LoRaMacStatus_t status;
+  MlmeReq_t mlmeReq;
+  mlmeReq.Type = MLME_PROPRIETARY;
+  mlmeReq.Req.Proprietary.Datarate = LORAWAN_HELLO_DATARATE;
 
-  // uint8_t txlen = DevProvisionPrepareHello(gTxBuf, sizeof(gTxBuf));
-  // if (txlen == 0) {
-  //   printf("ERROR. ProvisioningHello(): TX buf too small.\n");
-  // } else {
-  //   mlmeReq.Req.Proprietary.Payload = gTxBuf;
-  //   mlmeReq.Req.Proprietary.PayloadLen = txlen;
+  uint8_t txlen = DevProvisionPrepareHello(gTxBuf, sizeof(gTxBuf));
+  if (txlen == 0) {
+    printf("ERROR. ProvisioningHello(): TX buf too small.\n");
+  } else {
+    mlmeReq.Req.Proprietary.Payload = gTxBuf;
+    mlmeReq.Req.Proprietary.PayloadLen = txlen;
 
-  //   // Starts the Proprietary procedure
-  //   status = LoRaMacMlmeRequest(&mlmeReq);
-  //   LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
-  //   LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
+    // Starts the Proprietary procedure
+    status = LoRaMacMlmeRequest(&mlmeReq);
+    LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
+    LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
 
-  //   if (status == LORAMAC_STATUS_OK) {
-  //     LORACOMPON_PRINTLINE("  SUCCESS");
-  //   } else {
-  //     if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
-  //       LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
-  //     }
-  //   }
-  // }
+    if (status == LORAMAC_STATUS_OK) {
+      LORACOMPON_PRINTLINE("  SUCCESS");
+    } else {
+      if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
+        LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
+      }
+    }
+  }
 }
 
 //==========================================================================
@@ -381,29 +390,29 @@ static void ProvisioningAuth(void) {
   LORACOMPON_PRINTLINE("ProvisioningAuth()");
 
   //
-  // LoRaMacStatus_t status;
-  // MlmeReq_t mlmeReq;
-  // mlmeReq.Type = MLME_PROPRIETARY;
-  // mlmeReq.Req.Proprietary.Datarate = LORAWAN_HELLO_DATARATE;
+  LoRaMacStatus_t status;
+  MlmeReq_t mlmeReq;
+  mlmeReq.Type = MLME_PROPRIETARY;
+  mlmeReq.Req.Proprietary.Datarate = LORAWAN_HELLO_DATARATE;
 
-  // uint8_t txlen = DevProvisionPrepareAuth(gTxBuf, sizeof(gTxBuf));
+  uint8_t txlen = DevProvisionPrepareAuth(gTxBuf, sizeof(gTxBuf));
 
-  // mlmeReq.Req.Proprietary.Payload = gTxBuf;
-  // mlmeReq.Req.Proprietary.PayloadLen = txlen;
+  mlmeReq.Req.Proprietary.Payload = gTxBuf;
+  mlmeReq.Req.Proprietary.PayloadLen = txlen;
 
-  // // Starts the Proprietary procedure
-  // status = LoRaMacMlmeRequest(&mlmeReq);
+  // Starts the Proprietary procedure
+  status = LoRaMacMlmeRequest(&mlmeReq);
 
-  // LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
-  // LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
+  LORACOMPON_PRINTLINE("MLME-Request - MLME_PROPRIETARY");
+  LORACOMPON_PRINTLINE("  STATUS: %s", getMacStatusString(status));
 
-  // if (status == LORAMAC_STATUS_OK) {
-  //   LORACOMPON_PRINTLINE("  SUCCESS");
-  // } else {
-  //   if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
-  //     LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
-  //   }
-  // }
+  if (status == LORAMAC_STATUS_OK) {
+    LORACOMPON_PRINTLINE("  SUCCESS");
+  } else {
+    if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED) {
+      LORACOMPON_PRINTLINE("  Next Tx in: %u [ms]", (unsigned int)mlmeReq.ReqReturn.DutyCycleWaitTime);
+    }
+  }
 }
 
 //==========================================================================
@@ -422,24 +431,36 @@ static int8_t sendFrame(void) {
     LoRaMacMibSetRequestConfirm(&mibReq);
   }
 
+  // Workaround for 0 length
+  // The MAC will wrong when send a 0 byte frame.
+  // It will send 1 byte 0x00 instead.
+  if (gTxData.dataSize == 0) {
+    gTxData.data[0] = 0;
+    gTxData.dataSize = 1;
+  }
+
   // Check frame size
   ret_mac = LoRaMacQueryTxPossible(gTxData.dataSize, &txInfo);
   if (ret_mac != LORAMAC_STATUS_OK) {
     // LORACOMPON_PRINTLINE("CurrentPossiblePayloadSize=%d", txInfo.CurrentPossiblePayloadSize);
     // LORACOMPON_PRINTLINE("MaxPossibleApplicationDataSize=%d", txInfo.MaxPossibleApplicationDataSize);
     if (ret_mac == LORAMAC_STATUS_LENGTH_ERROR) {
-      uint8_t max_size = txInfo.CurrentPossiblePayloadSize;
-      // Try set datarate
-      LORACOMPON_PRINTLINE("Payload too large, try default DR%d", gLoRaLinkVar.dateRate);
-      mibReq.Type = MIB_CHANNELS_DATARATE;
-      mibReq.Param.ChannelsDatarate = gLoRaLinkVar.dateRate;
-      LoRaMacMibSetRequestConfirm(&mibReq);
-      if (LoRaMacQueryTxPossible(gTxData.dataSize, &txInfo) != LORAMAC_STATUS_OK) {
-        printf("ERROR. Payload is too large at current datarate. Max is %d.\n", txInfo.CurrentPossiblePayloadSize);
+      if (LORAWAN_ADR_ON) {
+        mibReq.Type = MIB_CHANNELS_DATARATE;
+        mibReq.Param.ChannelsDatarate = LORAWAN_DEFAULT_DATARATE;
+        LoRaMacMibSetRequestConfirm(&mibReq);
+        ret_mac = LoRaMacQueryTxPossible(gTxData.dataSize, &txInfo);
+        if (ret_mac != LORAMAC_STATUS_OK) {
+          printf("ERROR. Payload is too large at current datarate. Max is %d.", txInfo.CurrentPossiblePayloadSize);
+          gTxData.retry = 0;  // No more retry
+          return -1;
+        }
+        printf("WARNING. ADR is on and payload is too large. Using default DR%d.", LORAWAN_DEFAULT_DATARATE);
+      } else {
+        printf("ERROR. Payload is too large at current datarate. Max is %d.", txInfo.CurrentPossiblePayloadSize);
+        gTxData.retry = 0;  // No more retry
         return -1;
       }
-      printf("WARNING. Changed to default DR%d due to data size>%d\n", gLoRaLinkVar.dateRate, max_size);
-
     } else {
       printf("ERROR. LoRaMacQueryTxPossible() failed, %s\n", getMacStatusString(ret_mac));
       return -1;
@@ -566,48 +587,48 @@ static void MlmeConfirm(MlmeConfirm_t *mlmeConfirm) {
       }
       break;
     }
-    // case MLME_PROPRIETARY: {
-    //   if (mlmeConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
-    //     MibRequestConfirm_t mibGet;
-    //     LORACOMPON_PRINTLINE("  PROPRIETARY RXED");
-    //     LORACOMPON_PRINTLINE("  RSSI: %d", mlmeConfirm->ProprietaryRssi);
-    //     LORACOMPON_PRINTLINE("  MIC=%08X (%d)", (unsigned int)mlmeConfirm->ProprietaryMic, mlmeConfirm->ProprietaryMicCorrect);
-    //     LORACOMPON_PRINTLINE("  PayloadLen=%d", mlmeConfirm->ProprietaryPayloadLen);
-    //     if (mlmeConfirm->ProprietaryPayloadLen > 0) {
-    //       LORACOMPON_HEX2STRING("Payload:", mlmeConfirm->ProprietaryPayload, mlmeConfirm->ProprietaryPayloadLen);
-    //     }
-    //     mibGet.Type = MIB_CHANNELS_DATARATE;
-    //     LoRaMacMibGetRequestConfirm(&mibGet);
-    //     LORACOMPON_PRINTLINE("  DATA RATE: DR_%d", mibGet.Param.ChannelsDatarate);
+    case MLME_PROPRIETARY: {
+      if (mlmeConfirm->Status == LORAMAC_EVENT_INFO_STATUS_OK) {
+        MibRequestConfirm_t mibGet;
+        LORACOMPON_PRINTLINE("  PROPRIETARY RXED");
+        LORACOMPON_PRINTLINE("  RSSI: %d", mlmeConfirm->ProprietaryRssi);
+        LORACOMPON_PRINTLINE("  MIC=%08X (%d)", (unsigned int)mlmeConfirm->ProprietaryMic, mlmeConfirm->ProprietaryMicCorrect);
+        LORACOMPON_PRINTLINE("  PayloadLen=%d", mlmeConfirm->ProprietaryPayloadLen);
+        if (mlmeConfirm->ProprietaryPayloadLen > 0) {
+          LORACOMPON_HEX2STRING("Payload:", mlmeConfirm->ProprietaryPayload, mlmeConfirm->ProprietaryPayloadLen);
+        }
+        mibGet.Type = MIB_CHANNELS_DATARATE;
+        LoRaMacMibGetRequestConfirm(&mibGet);
+        LORACOMPON_PRINTLINE("  DATA RATE: DR_%d", mibGet.Param.ChannelsDatarate);
 
-    //     // Check resp
-    //     const uint8_t *resp = mlmeConfirm->ProprietaryPayload;
-    //     if (!mlmeConfirm->ProprietaryMicCorrect) {
-    //       LORACOMPON_PRINTLINE("  Wrong MIC, response dropped.");
-    //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_HELLO) && (resp[0] == DOWN_RESP_HELLO)) {
-    //       // Hello Response
-    //       if (DevProvisionHelloResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
-    //         LORACOMPON_PRINTLINE("  Hello response got.");
-    //         gProvisionStatus |= BIT_PROV_HELLO_OK;
-    //       }
-    //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_ACCEPT) && (resp[0] == DOWN_RESP_AUTH_ACCEPT)) {
-    //       // Auth Response
-    //       if (DevProvisionAuthResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
-    //         LORACOMPON_PRINTLINE("  Auth accepted.");
-    //         gProvisionStatus |= BIT_PROV_AUTH_OK;
-    //       }
-    //     } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_REJECT) && (resp[0] == DOWN_RESP_AUTH_REJECT)) {
-    //       if (DevProvisionCmpDevEui(&resp[1]) != 0) {
-    //         // Mismatch devEUI
-    //       } else {
-    //         LORACOMPON_PRINTLINE("  Auth rejected.");
-    //       }
-    //     } else {
-    //       LORACOMPON_PRINTLINE("Unknown proprietary frame.");
-    //     }
-    //   }
-    //   break;
-    // }
+        // Check resp
+        const uint8_t *resp = mlmeConfirm->ProprietaryPayload;
+        if (!mlmeConfirm->ProprietaryMicCorrect) {
+          LORACOMPON_PRINTLINE("  Wrong MIC, response dropped.");
+        } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_HELLO) && (resp[0] == DOWN_RESP_HELLO)) {
+          // Hello Response
+          if (DevProvisionHelloResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
+            LORACOMPON_PRINTLINE("  Hello response got.");
+            gProvisionStatus |= BIT_PROV_HELLO_OK;
+          }
+        } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_ACCEPT) && (resp[0] == DOWN_RESP_AUTH_ACCEPT)) {
+          // Auth Response
+          if (DevProvisionAuthResp(resp, mlmeConfirm->ProprietaryPayloadLen) == 0) {
+            LORACOMPON_PRINTLINE("  Auth accepted.");
+            gProvisionStatus |= BIT_PROV_AUTH_OK;
+          }
+        } else if ((mlmeConfirm->ProprietaryPayloadLen == SIZE_DOWN_RESP_AUTH_REJECT) && (resp[0] == DOWN_RESP_AUTH_REJECT)) {
+          if (DevProvisionCmpDevEui(&resp[1]) != 0) {
+            // Mismatch devEUI
+          } else {
+            LORACOMPON_PRINTLINE("  Auth rejected.");
+          }
+        } else {
+          LORACOMPON_PRINTLINE("Unknown proprietary frame.");
+        }
+      }
+      break;
+    }
     case MLME_LINK_CHECK: {
       break;
     }
@@ -665,60 +686,58 @@ static void InitOtaa(void) {
 
   // Setup Dev EUI
   mibReq.Type = MIB_DEV_EUI;
-  mibReq.Param.DevEui = gLoRaSetting.devEui;
+  mibReq.Param.DevEui = gLoRaSettings.devEui;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_JOIN_EUI;
-  mibReq.Param.JoinEui = gLoRaSetting.joinEui;
+  mibReq.Param.JoinEui = gLoRaSettings.joinEui;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_NWK_KEY;
-  mibReq.Param.NwkKey = gLoRaSetting.nwkKey;
+  mibReq.Param.NwkKey = gLoRaSettings.nwkKey;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   mibReq.Type = MIB_APP_KEY;
-  mibReq.Param.NwkKey = gLoRaSetting.appKey;
+  mibReq.Param.NwkKey = gLoRaSettings.appKey;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   LORACOMPON_PRINTLINE("InitOtaa()");
-  LORACOMPON_HEX2STRING("DevEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
-  LORACOMPON_HEX2STRING("JoinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
-  LORACOMPON_HEX2STRING("NwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
-  LORACOMPON_HEX2STRING("AppKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
+  LORACOMPON_HEX2STRING("DevEui:", gLoRaSettings.devEui, LORA_EUI_LENGTH);
+  LORACOMPON_HEX2STRING("JoinEui:", gLoRaSettings.joinEui, LORA_EUI_LENGTH);
+  LORACOMPON_HEX2STRING("NwkKey:", gLoRaSettings.nwkKey, LORA_KEY_LENGTH);
+  LORACOMPON_HEX2STRING("AppKey:", gLoRaSettings.appKey, LORA_KEY_LENGTH);
 }
 
 //==========================================================================
 // Init for Device Provisioning
 //==========================================================================
-// void CalVerifyCode(uint8_t *aDest, uint32_t aDestSize, const char *aProvisionId, const uint8_t *aNonce);
+static void InitDevProvision(void) {
+  LORACOMPON_PRINTLINE("InitDevProvision()");
+  LORACOMPON_PRINTLINE("PID=%s", gLoRaPreservedData.provisionId);
+  LORACOMPON_HEX2STRING("Hash=", gLoRaPreservedData.provisionIdHash, sizeof(gLoRaPreservedData.provisionIdHash));
 
-// static void InitDevProvision(void) {
-//   LORACOMPON_PRINTLINE("InitDevProvision()");
-//   LORACOMPON_PRINTLINE("PID=%s", gSystemSetting.provisionId);
-//   LORACOMPON_HEX2STRING("Hash=", gSystemSetting.provisionIdHash, sizeof(gSystemSetting.provisionIdHash));
+  DevProvisionInit(gLoRaPreservedData.provisionId, gLoRaPreservedData.provisionIdHash);
 
-//   DevProvisionInit(gSystemSetting.provisionId, gSystemSetting.provisionIdHash);
-
-//   // Setup key for MIC calculation
-//   MibRequestConfirm_t mibReq;
-//   uint8_t app_key[16];
-//   DevProvisionGetFixedKey(app_key, sizeof(app_key));
-//   mibReq.Type = MIB_NWK_KEY;
-//   mibReq.Param.AppKey = app_key;
-//   LoRaMacMibSetRequestConfirm(&mibReq);
-// }
+  // Setup key for MIC calculation
+  MibRequestConfirm_t mibReq;
+  uint8_t app_key[16];
+  DevProvisionGetFixedKey(app_key, sizeof(app_key));
+  mibReq.Type = MIB_NWK_KEY;
+  mibReq.Param.AppKey = app_key;
+  LoRaMacMibSetRequestConfirm(&mibReq);
+}
 
 //==========================================================================
 //==========================================================================
 static void ProcessJoinRetry(void) {
-  if (LORAWAN_SW_RADIO_COUNT != 0) {
-    LORACOMPON_PRINTLINE("joinRetryTimes=%d", gLoRaLinkVar.joinRetryTimes);
-    gLoRaLinkVar.joinRetryTimes++;
-    if (gLoRaLinkVar.joinRetryTimes >= LORAWAN_SW_RADIO_COUNT) {
-      gLoRaLinkVar.usingIsm2400 = !gLoRaLinkVar.usingIsm2400;
-      gLoRaLinkVar.joinRetryTimes = 0;
-    }
+#if (LORAWAN_SW_RADIO_COUNT != 0)
+  LORACOMPON_PRINTLINE("joinRetryTimes=%d", gLoRaLinkVar.joinRetryTimes);
+  gLoRaLinkVar.joinRetryTimes++;
+  if (gLoRaLinkVar.joinRetryTimes >= LORAWAN_SW_RADIO_COUNT) {
+    gLoRaLinkVar.usingIsm2400 = !gLoRaLinkVar.usingIsm2400;
+    gLoRaLinkVar.joinRetryTimes = 0;
   }
+#endif
 }
 
 //==========================================================================
@@ -896,77 +915,78 @@ void loraTask(void *param) {
 
         LoRaMacStart();
 
-#if mx_configUSE_DEVICE_PROVISIONING
-        if (gLoRaSetting.provisionDone) {
-          LORACOMPON_PRINTLINE("Device is provisioned.");
-          gLoraLinkState = S_LORALINK_JOIN;
-        } else {
-          gLinkStatus |= BIT_LORASTATUS_DEV_PROV;
+#if LORAWAN_DEV_PROVISIONING
+        if (!gLoRaSettings.provisionDone) {
+          LORACOMPON_PRINTLINE("Start provisioning.");
           gLoraLinkState = S_LORALINK_PROVISIONING_START;
           gTickLoraLink = 0;
           gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN;
+          break;
         }
-#else
+        LORACOMPON_PRINTLINE("Device is provisioned. Start join.");
+        LORACOMPON_HEX2STRING("  devEUI: ", gLoRaSettings.devEui, LORA_EUI_LENGTH);
+#endif
         if (device_activated) {
           gLinkStatus |= BIT_LORASTATUS_JOIN_PASS;
           gLoraLinkState = S_LORALINK_JOINED;
         } else {
           gLoraLinkState = S_LORALINK_JOIN;
         }
-#endif
         break;
       }
       case S_LORALINK_PROVISIONING_START:
-        // if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval)) {
-        //   gProvisionStatus = 0;
-        //   InitDevProvision();
-        //   ProvisioningHello();
-        //   gTickLoraLink = LoRaGetTick();
-        //   gLoraLinkState = S_LORALINK_PROVISIONING_HELLO;
-        // }
+        if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval)) {
+          gProvisionStatus = 0;
+          InitDevProvision();
+          ProvisioningHello();
+          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_PROVISIONING_HELLO;
+        }
         break;
 
       case S_LORALINK_PROVISIONING_HELLO:
-        // if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
-        //   gLoraLinkState = S_LORALINK_PROVISIONING_START;
-        //   gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
-        //   gTickLoraLink = LoRaGetTick();
-        // } else if ((gProvisionStatus & BIT_PROV_HELLO_OK) != 0) {
-        //   DevProvisionGenKeys();
-        //   gTickLoraLink = LoRaGetTick();
-        //   gLoraLinkState = S_LORALINK_PROVISIONING_AUTH;
-        // }
+        if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
+          gLoraLinkState = S_LORALINK_PROVISIONING_START;
+          gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
+          gTickLoraLink = LoRaGetTick();
+        } else if ((gProvisionStatus & BIT_PROV_HELLO_OK) != 0) {
+          DevProvisionGenKeys();
+          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_PROVISIONING_AUTH;
+        }
         break;
 
       case S_LORALINK_PROVISIONING_AUTH:
-        // if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_AUTHWAIT) {
-        //   ProvisioningAuth();
-        //   gTickLoraLink = LoRaGetTick();
-        //   gLoraLinkState = S_LORALINK_PROVISIONING_WAIT;
-        // }
+        if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_AUTHWAIT) {
+          ProvisioningAuth();
+          gTickLoraLink = LoRaGetTick();
+          gLoraLinkState = S_LORALINK_PROVISIONING_WAIT;
+        }
         break;
 
       case S_LORALINK_PROVISIONING_WAIT:
-        // if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
-        //   gLoraLinkState = S_LORALINK_PROVISIONING_START;
-        //   gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
-        //   gTickLoraLink = LoRaGetTick();
-        // } else if ((gProvisionStatus & BIT_PROV_AUTH_OK) != 0) {
-        //   LORACOMPON_PRINTLINE("  Provisioning the device.");
-        //   memcpy(gLoRaSetting.devEui, DevProvisioningGetAssignedDevEui(), LORA_EUI_LENGTH);
-        //   memcpy(gLoRaSetting.joinEui, DevProvisioningGetAssignedJoinEui(), LORA_EUI_LENGTH);
-        //   memcpy(gLoRaSetting.nwkKey, DevProvisioningGetAssignedNwkKey(), LORA_KEY_LENGTH);
-        //   memcpy(gLoRaSetting.appKey, DevProvisioningGetAssignedAppKey(), LORA_KEY_LENGTH);
-        //   gLoRaSetting.provisionDone = true;
-        //   AppSettingSave();
+        if (LoRaTickElapsed(gTickLoraLink) >= TIME_PROVISIONING_TIMEOUT) {
+          gLoraLinkState = S_LORALINK_PROVISIONING_START;
+          gLoRaLinkVar.joinInterval = TIME_PROV_INTERVAL_MIN + randr(0, RAND_RANGE_PROV_INTERVAL);
+          gTickLoraLink = LoRaGetTick();
+        } else if ((gProvisionStatus & BIT_PROV_AUTH_OK) != 0) {
+          LORACOMPON_PRINTLINE("  Provisioning the device.");
+          memcpy(gLoRaSettings.devEui, DevProvisioningGetAssignedDevEui(), LORA_EUI_LENGTH);
+          memcpy(gLoRaSettings.joinEui, DevProvisioningGetAssignedJoinEui(), LORA_EUI_LENGTH);
+          memcpy(gLoRaSettings.nwkKey, DevProvisioningGetAssignedNwkKey(), LORA_KEY_LENGTH);
+          memcpy(gLoRaSettings.appKey, DevProvisioningGetAssignedAppKey(), LORA_KEY_LENGTH);
+          gLoRaSettings.provisionDone = true;
+          if (LoRaDataSaveSettings(&gLoRaSettings) == 0) {
+            LORACOMPON_PRINTLINE("  Saved.");
+          }
 
-        //   LORACOMPON_HEX2STRING("  devEui:", gLoRaSetting.devEui, LORA_EUI_LENGTH);
-        //   LORACOMPON_HEX2STRING("  joinEui:", gLoRaSetting.joinEui, LORA_EUI_LENGTH);
-        //   LORACOMPON_HEX2STRING("  appKey:", gLoRaSetting.appKey, LORA_KEY_LENGTH);
-        //   LORACOMPON_HEX2STRING("  nwkKey:", gLoRaSetting.nwkKey, LORA_KEY_LENGTH);
+          LORACOMPON_HEX2STRING("  devEui:", gLoRaSettings.devEui, LORA_EUI_LENGTH);
+          LORACOMPON_HEX2STRING("  joinEui:", gLoRaSettings.joinEui, LORA_EUI_LENGTH);
+          LORACOMPON_HEX2STRING("  appKey:", gLoRaSettings.appKey, LORA_KEY_LENGTH);
+          LORACOMPON_HEX2STRING("  nwkKey:", gLoRaSettings.nwkKey, LORA_KEY_LENGTH);
 
-        //   gLoraLinkState = S_LORALINK_INIT;
-        // }
+          gLoraLinkState = S_LORALINK_INIT;
+        }
         break;
 
       case S_LORALINK_JOIN: {
@@ -1070,8 +1090,7 @@ void loraTask(void *param) {
         if (LORAWAN_LINK_FAIL_COUNT) {
           gLoRaLinkVar.failCount++;
           LORACOMPON_PRINTLINE("failCount=%d", gLoRaLinkVar.failCount);
-        }
-        else {
+        } else {
           gLoRaLinkVar.failCount = -1;
         }
         TakeMutex();
@@ -1099,10 +1118,13 @@ void loraTask(void *param) {
         gTxData.dataSize = -1;  // End of TX
         FreeMutex();
         gLoRaLinkVar.failCount = 0;
+#if (LORAWAN_UNCONFIRMED_COUNT > 0)
         if (gLoRaLinkVar.unconfigmedCount >= LORAWAN_UNCONFIRMED_COUNT) {
           gLoRaLinkVar.unconfigmedCount = 0;
           gLoRaLinkVar.txConfirmed = true;
-        } else {
+        } else
+#endif
+        {
           gLoRaLinkVar.unconfigmedCount++;
           gLoRaLinkVar.txConfirmed = false;
         }
@@ -1179,7 +1201,7 @@ void loraTask(void *param) {
     //   }
     // }
   }
-  printf("LoRaTask ended.\n");
+  printf("INFO. LoRaTask ended.\n");
   LoRaMacDeInitialization();
   gLoRaTaskHandle = NULL;
   vTaskDelete(NULL);
@@ -1213,27 +1235,17 @@ void LoRaComponHwInit(void) { LoRaBoardInitMcu(); }
 //==========================================================================
 // Start the LoRa
 //==========================================================================
-int8_t LoRaComponStart(bool aWakeFromSleep) {
+int8_t LoRaComponStart(const char *aPid, const uint8_t *aPidHash, bool aWakeFromSleep) {
   //
   InitMutex();
 
-  // Get MAC address
-  uint8_t mac[6];
-  esp_efuse_mac_get_default(mac);
+  //
+  LoRaDataInit();
+  LoRaDataReadSettings(&gLoRaSettings);
 
-  // Default setting
-  gLoRaSetting.devEui[0] = mac[0];
-  gLoRaSetting.devEui[1] = mac[1];
-  gLoRaSetting.devEui[2] = mac[2];
-  gLoRaSetting.devEui[3] = 0xff;
-  gLoRaSetting.devEui[4] = 0xfe;
-  gLoRaSetting.devEui[5] = mac[3];
-  gLoRaSetting.devEui[6] = mac[4];
-  gLoRaSetting.devEui[7] = mac[5];
-
-  memset(gLoRaSetting.joinEui, 0x00, LORA_EUI_LENGTH);
-  memset(gLoRaSetting.nwkKey, 0x01, LORA_KEY_LENGTH);
-  memset(gLoRaSetting.appKey, 0x02, LORA_KEY_LENGTH);
+  // PID
+  strncpy(gLoRaPreservedData.provisionId, aPid, sizeof(gLoRaPreservedData.provisionId));
+  memcpy(gLoRaPreservedData.provisionIdHash, aPidHash, sizeof(gLoRaPreservedData.provisionIdHash));
 
   //
   gWakeFromSleep = aWakeFromSleep;
@@ -1497,7 +1509,13 @@ void LoRaComponSetExtPower(void) { gLoRaLinkVar.batteryValue = BAT_LEVEL_EXT_SRC
 //==========================================================================
 // Check status
 //==========================================================================
-bool LoRaComponIsProvisioned(void) { return ((GetStatus() & BIT_LORASTATUS_DEV_PROV) != 0); }
+bool LoRaComponIsProvisioned(void) { 
+#if LORAWAN_DEV_PROVISIONING
+  return gLoRaSettings.provisionDone;
+#else
+  return true;
+#endif
+}
 
 bool LoRaComponIsJoined(void) { return ((GetStatus() & BIT_LORASTATUS_JOIN_PASS) != 0); }
 
@@ -1506,3 +1524,27 @@ bool LoRaComponIsSendSuccess(void) { return ((GetStatus() & BIT_LORASTATUS_SEND_
 bool LoRaComponIsSendDone(void) { return ((GetStatus() & BIT_LORASTATUS_TX_RDY) != 0); }
 
 bool LoRaComponIsIsm2400(void) { return gLoRaLinkVar.usingIsm2400; }
+
+//==========================================================================
+// Settings
+//==========================================================================
+int8_t LoRaComponGetSettings(LoRaSettings_t *aSettings) {
+  if (TakeMutex()) {
+    memcpy(aSettings, &gLoRaSettings, sizeof(LoRaSettings_t));
+    FreeMutex();
+    return 0;
+  } else {
+    memset(aSettings, 0, sizeof(LoRaSettings_t));
+    return -1;
+  }
+}
+
+void LoRaComponResetSettings(void) {
+  LoRaComponStop();
+  for (int i = 0; i < 100; i++) {
+    if (gLoRaTaskHandle == NULL) break;
+    DelayMs(10);
+  }
+  LoRaDataResetToDefault();
+  LoRaDataReadSettings(&gLoRaSettings);
+}

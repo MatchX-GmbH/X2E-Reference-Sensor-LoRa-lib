@@ -21,6 +21,44 @@ Maintainer: Miguel Luis ( Semtech ), Gregory Cristian ( Semtech ),
 #include "LoRaMacSerializer.h"
 #include "utilities.h"
 
+#include "LoRaMac_debug.h"
+
+LoRaMacSerializerStatus_t LoRaMacSerializerProprietary( LoRaMacMessageProprietary_t* macMsg )
+{
+    if( ( macMsg == 0 ) || ( macMsg->Buffer == 0 ) )
+    {
+        return LORAMAC_SERIALIZER_ERROR_NPE;
+    }
+
+    // Check macMsg->BufSize
+    uint16_t computedBufSize =   LORAMAC_MHDR_FIELD_SIZE
+                               + LORAMAC_MIC_FIELD_SIZE
+                               + macMsg->PayloadSize;
+
+    if( macMsg->BufSize < computedBufSize )
+    {
+        return LORAMAC_SERIALIZER_ERROR_BUF_SIZE;
+    }
+
+    //
+    uint16_t bufItr = 0;
+
+
+    macMsg->Buffer[bufItr++] = macMsg->MHDR.Value;
+
+    memcpy1( &macMsg->Buffer[bufItr], macMsg->Payload, macMsg->PayloadSize );
+    bufItr += macMsg->PayloadSize;
+
+    macMsg->Buffer[bufItr++] = macMsg->MIC & 0xFF;
+    macMsg->Buffer[bufItr++] = ( macMsg->MIC >> 8 ) & 0xFF;
+    macMsg->Buffer[bufItr++] = ( macMsg->MIC >> 16 ) & 0xFF;
+    macMsg->Buffer[bufItr++] = ( macMsg->MIC >> 24 ) & 0xFF;
+
+    macMsg->BufSize = bufItr;
+    LORAMAC_PRINTLINE ("LoRaMacSerializerProprietary MIC=%08X", (unsigned int)macMsg->MIC);
+    return LORAMAC_SERIALIZER_SUCCESS;
+}
+
 LoRaMacSerializerStatus_t LoRaMacSerializerJoinRequest( LoRaMacMessageJoinRequest_t* macMsg )
 {
     if( ( macMsg == 0 ) || ( macMsg->Buffer == 0 ) )

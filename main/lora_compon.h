@@ -21,7 +21,8 @@ typedef struct {
     uint8_t joinEui[LORA_EUI_LENGTH];
     uint8_t nwkKey[LORA_KEY_LENGTH];
     uint8_t appKey[LORA_KEY_LENGTH];
-}LoRaSetting_t;
+    bool provisionDone;
+}LoRaSettings_t;
 
 typedef struct {
     uint8_t fport;
@@ -33,7 +34,7 @@ typedef struct {
 //==========================================================================
 void LoRaComponHwInit(void);
 
-int8_t LoRaComponStart(bool aWakeFromSleep);
+int8_t LoRaComponStart(const char *aPid, const uint8_t *aPidHash, bool aWakeFromSleep);
 void LoRaComponStop(void);
 const char *LoRaComponRegionName(void);
 //void LoRaComponNotify(uint32_t aEvent, void *aCallback);
@@ -59,6 +60,9 @@ bool LoRaComponIsJoined(void);
 bool LoRaComponIsSendDone(void);
 bool LoRaComponIsSendSuccess(void);
 bool LoRaComponIsIsm2400(void);
+
+int8_t LoRaComponGetSettings(LoRaSettings_t *aSettings);
+void LoRaComponResetSettings(void);
 
 //==========================================================================
 //==========================================================================

@@ -69,6 +69,14 @@ typedef enum eLoRaMacSerializerStatus
 }LoRaMacSerializerStatus_t;
 
 /*!
+ * Creates serialized MAC message of structured object. (MatchX)
+ *
+ * \param[IN/OUT] macMsg        - Proprietary message object
+ * \retval                      - Status of the operation
+ */
+LoRaMacSerializerStatus_t LoRaMacSerializerProprietary( LoRaMacMessageProprietary_t* macMsg );
+
+/*!
  * Creates serialized MAC message of structured object.
  *
  * \param[IN/OUT] macMsg        - Join-request message object

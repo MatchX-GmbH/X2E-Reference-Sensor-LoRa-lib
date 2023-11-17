@@ -1117,6 +1117,10 @@ typedef enum eMlme
      */
     MLME_UNKNOWN,
     /*!
+     * Proprietary message (MatchX)
+     */
+    MLME_PROPRIETARY,
+    /*!
      * Initiates the Over-the-Air activation
      *
      * LoRaWAN Specification V1.0.2, chapter 6.2
@@ -1210,6 +1214,16 @@ typedef enum eMlme
 }Mlme_t;
 
 /*!
+ * LoRaMAC MLME-Request for the proprietary frame (MatchX)
+ */
+typedef struct sMlmeReqProprietary
+{
+    uint8_t Datarate;
+    const uint8_t *Payload;
+    uint8_t PayloadLen;
+}MlmeReqProprietary_t;
+
+/*!
  * LoRaMAC MLME-Request for the join service
  */
 typedef struct sMlmeReqJoin
@@ -1299,6 +1313,10 @@ typedef struct sMlmeReq
     union uMlmeParam
     {
         /*!
+         * MLME-Request parameters for a Proprietary frame (MatchX)
+         */
+        MlmeReqProprietary_t Proprietary;
+        /*!
          * MLME-Request parameters for a join request
          */
         MlmeReqJoin_t Join;
@@ -1365,6 +1383,14 @@ typedef struct sMlmeConfirm
      * The channel of the next beacon
      */
     uint8_t BeaconTimingChannel;
+    /*!
+     * Data received for Proprietary frame (MatchX)
+     */
+    const uint8_t *ProprietaryPayload;
+    uint8_t ProprietaryPayloadLen;
+    uint32_t ProprietaryMic;
+    bool ProprietaryMicCorrect;
+    int16_t ProprietaryRssi;
 }MlmeConfirm_t;
 
 /*!

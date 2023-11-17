@@ -41,6 +41,8 @@
 #include "LoRaMacSerializer.h"
 #include "LoRaMacCrypto.h"
 
+#include "LoRaMac_debug.h"
+
 //
 SecureElementStatus_t SecureElementRandomNumber( uint32_t* randomNum );
 
@@ -978,6 +980,62 @@ LoRaMacCryptoStatus_t LoRaMacCryptoSetKey( KeyIdentifier_t keyID, uint8_t* key )
             return LORAMAC_CRYPTO_ERROR_SECURE_ELEMENT_FUNC;
         }
     }
+    return LORAMAC_CRYPTO_SUCCESS;
+}
+
+// Preapre proprietary frame (MatchX)
+LoRaMacCryptoStatus_t LoRaMacCryptoPrepareProprietary( LoRaMacMessageProprietary_t* macMsg )
+{
+    if( macMsg == 0 )
+    {
+        return LORAMAC_CRYPTO_ERROR_NPE;
+    }
+    KeyIdentifier_t micComputationKeyID = NWK_KEY;
+
+    // Serialize message
+    if( LoRaMacSerializerProprietary( macMsg ) != LORAMAC_SERIALIZER_SUCCESS )
+    {
+        return LORAMAC_CRYPTO_ERROR_SERIALIZER;
+    }
+
+    // Compute mic
+    if( SecureElementComputeAesCmac( NULL, macMsg->Buffer, ( macMsg->BufSize - LORAMAC_MIC_FIELD_SIZE ), micComputationKeyID, &macMsg->MIC ) != SECURE_ELEMENT_SUCCESS )
+    {
+        return LORAMAC_CRYPTO_ERROR_SECURE_ELEMENT_FUNC;
+    }
+
+    // Reserialize message to add the MIC
+    if( LoRaMacSerializerProprietary( macMsg ) != LORAMAC_SERIALIZER_SUCCESS )
+    {
+        return LORAMAC_CRYPTO_ERROR_SERIALIZER;
+    }
+
+    return LORAMAC_CRYPTO_SUCCESS;
+}
+
+// Check proprietary frame (MatchX)
+LoRaMacCryptoStatus_t LoRaMacCryptoCheckProprietary( uint8_t* macPayload, uint16_t payloadLen, uint32_t *retMic )
+{
+    uint32_t cal_mic;
+    KeyIdentifier_t micComputationKeyID = NWK_KEY;
+
+    if (payloadLen < 4) {
+        return LORAMAC_CRYPTO_ERROR;
+    }
+    uint8_t *mic_ptr = &macPayload[payloadLen - 4];
+    uint32_t payload_mic = ((uint32_t)mic_ptr[3] << 24) | ((uint32_t)mic_ptr[2] << 16)
+                 | ((uint32_t)mic_ptr[1] << 8) | ((uint32_t)mic_ptr[0]);
+    if( SecureElementComputeAesCmac( NULL, macPayload, (payloadLen - 4), micComputationKeyID, &cal_mic ) != SECURE_ELEMENT_SUCCESS )
+    {
+        return LORAMAC_CRYPTO_ERROR_SECURE_ELEMENT_FUNC;
+    }
+    LORAMAC_PRINTLINE("LoRaMacCryptoCheckProprietary() cal_mic=%08X, payload_mic=%08X", (unsigned int)cal_mic, (unsigned int)payload_mic);
+
+    if (cal_mic != payload_mic) {
+        return LORAMAC_CRYPTO_ERROR;
+    }
+
+    *retMic = payload_mic;
     return LORAMAC_CRYPTO_SUCCESS;
 }
 

@@ -467,7 +467,7 @@ LoRaMacStatus_t PrepareFrame( LoRaMacHeader_t* macHdr, LoRaMacFrameCtrl_t* fCtrl
  *                            the duty cycle restriction is active
  * \retval Status of the operation
  */
-static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx );
+static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx, bool isProprietary  );
 
 /*
  * \brief Secures the current processed frame ( TxMsg )
@@ -1401,14 +1401,38 @@ static void ProcessRadioRxDone( void )
 
             break;
         case FRAME_TYPE_PROPRIETARY:
-            memcpy1( MacCtx.RxPayload, &payload[pktHeaderLen], size - pktHeaderLen );
+            if(( LoRaMacConfirmQueueIsCmdActive( MLME_PROPRIETARY ) == true ) && (size >= (pktHeaderLen + 4)))
+            {
+                // MLME Proprietary handling (MatchX)
+                memcpy1( MacCtx.RxPayload, &payload[pktHeaderLen], size - pktHeaderLen - 4 );
+                MacCtx.MlmeConfirm.ProprietaryPayload = MacCtx.RxPayload;
+                MacCtx.MlmeConfirm.ProprietaryPayloadLen = size - pktHeaderLen - 4;
+                MacCtx.MlmeConfirm.ProprietaryRssi = rssi;
 
-            MacCtx.McpsIndication.McpsIndication = MCPS_PROPRIETARY;
-            MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_OK;
-            MacCtx.McpsIndication.Buffer = MacCtx.RxPayload;
-            MacCtx.McpsIndication.BufferSize = size - pktHeaderLen;
+                uint32_t mic;
+                if (LoRaMacCryptoCheckProprietary(payload, size, &mic) == LORAMAC_CRYPTO_SUCCESS) {
+                    MacCtx.MlmeConfirm.ProprietaryMic = mic;
+                    MacCtx.MlmeConfirm.ProprietaryMicCorrect = true;
+                }
+                else {
+                    uint8_t *mic_ptr = &payload[size - 4];
+                    MacCtx.MlmeConfirm.ProprietaryMic = ((uint32_t)mic_ptr[3] << 24) | ((uint32_t)mic_ptr[2] << 16)
+                     | ((uint32_t)mic_ptr[1] << 8) | ((uint32_t)mic_ptr[0]);
+                    MacCtx.MlmeConfirm.ProprietaryMicCorrect = false;
+                }
+                LoRaMacConfirmQueueSetStatus( LORAMAC_EVENT_INFO_STATUS_OK, MLME_PROPRIETARY );
+            }
+            else
+            {
+                memcpy1( MacCtx.RxPayload, &payload[pktHeaderLen], size - pktHeaderLen );
 
-            MacCtx.MacFlags.Bits.McpsInd = 1;
+                MacCtx.McpsIndication.McpsIndication = MCPS_PROPRIETARY;
+                MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_OK;
+                MacCtx.McpsIndication.Buffer = MacCtx.RxPayload;
+                MacCtx.McpsIndication.BufferSize = size - pktHeaderLen;
+
+                MacCtx.MacFlags.Bits.McpsInd = 1;
+            }
             break;
         default:
             MacCtx.McpsIndication.Status = LORAMAC_EVENT_INFO_STATUS_ERROR;
@@ -1739,6 +1763,11 @@ static void LoRaMacHandleMlmeRequest( void )
             MacCtx.ChannelsNbTransCounter = 0;
             MacCtx.MacState &= ~LORAMAC_TX_RUNNING;
         }
+        else if ( LoRaMacConfirmQueueIsCmdActive( MLME_PROPRIETARY ) == true )
+        {
+            // MLME Proprietary frame (MatchX)
+            MacCtx.MacState &= ~LORAMAC_TX_RUNNING;
+        }
         else if( LoRaMacConfirmQueueIsCmdActive( MLME_TXCW ) == true )
         {
             MacCtx.MacState &= ~LORAMAC_TX_RUNNING;
@@ -1925,7 +1954,7 @@ static void OnTxDelayedTimerEvent( void* context )
     }
 
     // Schedule frame, allow delayed frame transmissions
-    switch( ScheduleTx( true ) )
+    switch( ScheduleTx( true, false ) )
     {
         case LORAMAC_STATUS_OK:
         case LORAMAC_STATUS_DUTYCYCLE_RESTRICTED:
@@ -2736,7 +2765,7 @@ LoRaMacStatus_t Send( LoRaMacHeader_t* macHdr, uint8_t fPort, void* fBuffer, uin
     if( ( status == LORAMAC_STATUS_OK ) || ( status == LORAMAC_STATUS_SKIPPED_APP_DATA ) )
     {
         // Schedule frame, do not allow delayed transmissions
-        status = ScheduleTx( false );
+        status = ScheduleTx( false, false );
     }
 
     // Post processing
@@ -2758,6 +2787,35 @@ LoRaMacStatus_t Send( LoRaMacHeader_t* macHdr, uint8_t fPort, void* fBuffer, uin
             return LORAMAC_STATUS_MAC_COMMAD_ERROR;
         }
     }
+    return status;
+}
+
+// (MatchX)
+LoRaMacStatus_t SendProprietary( const uint8_t *payload, uint8_t payloadLen)
+{
+    LoRaMacStatus_t status = LORAMAC_STATUS_OK;
+    LoRaMacHeader_t macHdr;
+    macHdr.Value = 0;
+    bool allowDelayedTx = true;
+
+    // Setup  message
+    SwitchClass( CLASS_A );
+
+    MacCtx.TxMsg.Type = LORAMAC_MSG_TYPE_PROPRIETARY;
+
+    MacCtx.TxMsg.Message.Proprietary.Buffer = MacCtx.PktBuffer;
+    MacCtx.TxMsg.Message.Proprietary.BufSize = LORAMAC_PHY_MAXPAYLOAD;
+
+    macHdr.Bits.MType = FRAME_TYPE_PROPRIETARY;
+    MacCtx.TxMsg.Message.Proprietary.MHDR.Value = macHdr.Value;
+
+    MacCtx.TxMsg.Message.Proprietary.Payload = payload;
+    MacCtx.TxMsg.Message.Proprietary.PayloadSize = payloadLen;
+
+    allowDelayedTx = false;
+
+    // Schedule frame
+    status = ScheduleTx( allowDelayedTx, true );
     return status;
 }
 
@@ -2852,7 +2910,7 @@ LoRaMacStatus_t SendReJoinReq( JoinReqIdentifier_t joinReqType )
     }
 
     // Schedule frame
-    status = ScheduleTx( allowDelayedTx );
+    status = ScheduleTx( allowDelayedTx, false );
     return status;
 }
 
@@ -2963,6 +3021,15 @@ static LoRaMacStatus_t SerializeTxFrame( void )
             }
             MacCtx.PktBufferLen = MacCtx.TxMsg.Message.Data.BufSize;
             break;
+        case LORAMAC_MSG_TYPE_PROPRIETARY:
+            // For Proprietary frame (MatchX)
+            serializeStatus = LoRaMacSerializerProprietary( &MacCtx.TxMsg.Message.Proprietary );
+            if( LORAMAC_SERIALIZER_SUCCESS != serializeStatus )
+            {
+                return LORAMAC_STATUS_CRYPTO_ERROR;
+            }
+            MacCtx.PktBufferLen = MacCtx.TxMsg.Message.Proprietary.BufSize;
+            break;
         case LORAMAC_MSG_TYPE_JOIN_ACCEPT:
         case LORAMAC_MSG_TYPE_UNDEF:
         default:
@@ -2971,7 +3038,7 @@ static LoRaMacStatus_t SerializeTxFrame( void )
     return LORAMAC_STATUS_OK;
 }
 
-static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx )
+static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx, bool isProprietary  )
 {
     LoRaMacStatus_t status = LORAMAC_STATUS_PARAMETER_INVALID;
     NextChanParams_t nextChan;
@@ -3006,7 +3073,10 @@ static LoRaMacStatus_t ScheduleTx( bool allowDelayedTx )
     if( Nvm.MacGroup2.NetworkActivation == ACTIVATION_TYPE_NONE )
     {
         nextChan.LastTxIsJoinRequest = true;
-        nextChan.Joined = false;
+        // (MatchX)
+        if (!isProprietary) {
+            nextChan.Joined = false;
+        }
     }
 
     // Select channel
@@ -3101,6 +3171,15 @@ static LoRaMacStatus_t SecureFrame( uint8_t txDr, uint8_t txCh )
                 return LORAMAC_STATUS_CRYPTO_ERROR;
             }
             MacCtx.PktBufferLen = MacCtx.TxMsg.Message.Data.BufSize;
+            break;
+        case LORAMAC_MSG_TYPE_PROPRIETARY:
+            // MLME Proprietary frame (MatchX)
+            macCryptoStatus = LoRaMacCryptoPrepareProprietary( &MacCtx.TxMsg.Message.Proprietary );
+            if( LORAMAC_CRYPTO_SUCCESS != macCryptoStatus )
+            {
+                return LORAMAC_STATUS_CRYPTO_ERROR;
+            }
+            MacCtx.PktBufferLen = MacCtx.TxMsg.Message.JoinReq.BufSize;
             break;
         case LORAMAC_MSG_TYPE_JOIN_ACCEPT:
         case LORAMAC_MSG_TYPE_UNDEF:
@@ -5336,6 +5415,29 @@ LoRaMacStatus_t LoRaMacMlmeRequest( MlmeReq_t* mlmeRequest )
 
     switch( mlmeRequest->Type )
     {
+        case MLME_PROPRIETARY:
+        {
+            if( ( MacCtx.MacState & LORAMAC_TX_DELAYED ) == LORAMAC_TX_DELAYED )
+            {
+                LORAMAC_PRINTLINE("LoRaMacMlmeRequest() !LORAMAC_TX_DELAYED");
+                return LORAMAC_STATUS_BUSY;
+            }
+            
+            // MLME Proprietary frame (MatchX)
+            if( ( MacCtx.MacState & LORAMAC_TX_DELAYED ) == LORAMAC_TX_DELAYED )
+            {
+                return LORAMAC_STATUS_BUSY;
+            }
+
+            ResetMacParameters( false );
+
+            
+            Nvm.MacGroup1.ChannelsDatarate = mlmeRequest->Req.Proprietary.Datarate;
+            queueElement.Status = LORAMAC_EVENT_INFO_STATUS_JOIN_FAIL;
+ 
+            status = SendProprietary(mlmeRequest->Req.Proprietary.Payload, mlmeRequest->Req.Proprietary.PayloadLen);
+            break;
+        }
         case MLME_JOIN:
         {
             if( ( MacCtx.MacState & LORAMAC_TX_DELAYED ) == LORAMAC_TX_DELAYED )

@@ -46,6 +46,37 @@ extern "C"
 #include "LoRaMacHeaderTypes.h"
 
 /*!
+ * LoRaMac type for Proprietary message (MatchX)
+ */
+typedef struct sLoRaMacMessageProprietary
+{
+    /*!
+     * Serialized message buffer
+     */
+    uint8_t* Buffer;
+    /*!
+     * Size of serialized message buffer
+     */
+    uint8_t BufSize;
+    /*!
+     * MAC header
+     */
+    LoRaMacHeader_t MHDR;
+    /*!
+     *  Payload
+     */
+    const uint8_t *Payload;
+    /*!
+     * Payload size
+     */
+    uint8_t PayloadSize;
+    /*!
+     * Message integrity code (MIC)
+     */
+    uint32_t MIC;
+}LoRaMacMessageProprietary_t;
+
+/*!
  * LoRaMac type for Join-request message
  */
 typedef struct sLoRaMacMessageJoinRequest
@@ -272,6 +303,10 @@ typedef enum eLoRaMacMessageType
      */
     LORAMAC_MSG_TYPE_DATA,
     /*!
+     * Proprietary messages (MatchX)
+     */
+    LORAMAC_MSG_TYPE_PROPRIETARY,
+    /*!
      * Undefined message type
      */
     LORAMAC_MSG_TYPE_UNDEF,
@@ -290,6 +325,7 @@ typedef struct sLoRaMacMessage
         LoRaMacMessageReJoinType0or2_t ReJoin0or2;
         LoRaMacMessageJoinAccept_t JoinAccept;
         LoRaMacMessageData_t Data;
+        LoRaMacMessageProprietary_t Proprietary;    // Proprietary frame (MatchX)
     }Message;
 }LoRaMacMessage_t;
 

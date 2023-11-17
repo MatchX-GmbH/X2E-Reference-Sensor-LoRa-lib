@@ -12,6 +12,8 @@ Basic usage:
 
 
 
+*Important: Please initialise the NVS (call `nvs_flash_init()`) at your application first.*
+
 ## Confirmed and Unconfirmed Uplink 
 
 When sending data via `LoRaComponSendData()`, the component will decide to use a Confirmed uplink or not. The `LORAWAN_UNCONFIRMED_COUNT` could control how this being handled in the component.

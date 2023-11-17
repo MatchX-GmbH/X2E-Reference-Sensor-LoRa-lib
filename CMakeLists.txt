@@ -40,6 +40,7 @@ endif()
 
 #
 idf_component_register(SRC_DIRS "${src_dirs}"
-                    INCLUDE_DIRS "${inc_dirs}")
+                    INCLUDE_DIRS "${inc_dirs}"
+                    REQUIRES nvs_flash)
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC SOFT_SE=1 ${defines})
