@@ -425,7 +425,7 @@ typedef enum RadioChip_e {
 
 // Additional
 void RadioSelectChip (RadioChip_t aRadioType);
-bool RadioIsChipError(void);
+void RadioHandleChipError(void);
 
 #ifdef __cplusplus
 }

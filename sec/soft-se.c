@@ -233,7 +233,7 @@ SecureElementStatus_t SecureElementAesEncrypt( uint8_t *buffer, uint16_t size, K
     SecureElementStatus_t retval = GetKeyByID( keyID, &pItem );
 
     if ( retval == SECURE_ELEMENT_SUCCESS ) {
-        aes_set_key( pItem->KeyValue, 16, &aesContext );
+        lora_aes_set_key( pItem->KeyValue, 16, &aesContext );
 
         uint8_t block = 0;
 

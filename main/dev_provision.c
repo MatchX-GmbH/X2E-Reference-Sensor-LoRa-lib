@@ -86,7 +86,7 @@ static void DeriveKey(uint8_t *aAppKey, uint8_t *aNwkKey, uint8_t *aProvKey, con
   memcpy(in_buf, aDevEui, 8);
 
   memset(aes_ctx.ksch, '\0', 240);
-  aes_set_key(key, 16, &aes_ctx);
+  lora_aes_set_key(key, 16, &aes_ctx);
   laes_encrypt(in_buf, out_buf, &aes_ctx);
   memset(aes_ctx.ksch, '\0', 240);
 
@@ -99,7 +99,7 @@ static void DeriveKey(uint8_t *aAppKey, uint8_t *aNwkKey, uint8_t *aProvKey, con
   memcpy(in_buf, aDevEui, 8);
 
   memset(aes_ctx.ksch, '\0', 240);
-  aes_set_key(key, 16, &aes_ctx);
+  lora_aes_set_key(key, 16, &aes_ctx);
   laes_encrypt(in_buf, out_buf, &aes_ctx);
   memset(aes_ctx.ksch, '\0', 240);
 
@@ -113,7 +113,7 @@ static void DeriveKey(uint8_t *aAppKey, uint8_t *aNwkKey, uint8_t *aProvKey, con
   memcpy(in_buf, aDevEui, 8);
 
   memset(aes_ctx.ksch, '\0', 240);
-  aes_set_key(key, 16, &aes_ctx);
+  lora_aes_set_key(key, 16, &aes_ctx);
   laes_encrypt(in_buf, out_buf, &aes_ctx);
   memset(aes_ctx.ksch, '\0', 240);
 
@@ -155,7 +155,7 @@ void DevProvisionGetFixedKey(uint8_t *aDest, uint16_t aDestSize) {
   memset(aDest, 0, sizeof(aDestSize));
 
   memset(aes_ctx.ksch, '\0', 240);
-  aes_set_key(kEpromKey, 16, &aes_ctx);
+  lora_aes_set_key(kEpromKey, 16, &aes_ctx);
   laes_encrypt(kEncFixedKey, out_buf, &aes_ctx);
   memset(aes_ctx.ksch, '\0', 240);
 
@@ -223,7 +223,7 @@ static void EncryptPayload(uint8_t *aPayload, uint32_t aPayloadLen, const uint8_
     a_block[15] = block_counter;
 
     memset(aes_ctx.ksch, '\0', 240);
-    aes_set_key(aKey, 16, &aes_ctx);
+    lora_aes_set_key(aKey, 16, &aes_ctx);
     laes_encrypt(a_block, s_block, &aes_ctx);
 
     uint32_t xor_len = aPayloadLen;

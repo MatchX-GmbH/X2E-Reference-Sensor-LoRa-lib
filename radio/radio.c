@@ -40,7 +40,9 @@ static RadioChip_t gCurrentChip;
 // HAL Prototypes
 //==========================================================================
 bool SX126xIsError(void);
+void SX126xIoInit(void);
 bool SX1280IsError(void);
+void SX1280HalInit(void);
 
 //==========================================================================
 // Select active Radio chip
@@ -61,10 +63,13 @@ void RadioSelectChip(RadioChip_t aRadioType) {
 //==========================================================================
 // Check Radio chip error
 //==========================================================================
-bool RadioIsChipError(void) {
-  if (gCurrentChip == RADIO_CHIP_SX1280) {
-    return SX1280IsError();
-  } else {
-    return SX126xIsError();
+void RadioHandleChipError(void) {
+  if (SX1280IsError()) {
+    LORARADIO_PRINTLINE("SX1280 chip error. Try init again.");
+    SX1280HalInit();
+  }
+  if (SX126xIsError()) {
+    LORARADIO_PRINTLINE("SX126x chip error. Try init again.");
+    SX126xIoInit();
   }
 }

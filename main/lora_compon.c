@@ -1180,6 +1180,7 @@ void loraTask(void *param) {
       }
     }
 
+    RadioHandleChipError();
     DelayMs(10);
 
     // if (gLoraLinkState == S_LORALINK_SLEEP) {

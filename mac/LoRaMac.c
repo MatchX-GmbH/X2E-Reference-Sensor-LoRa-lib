@@ -1821,7 +1821,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // Crypto
-    crc = Crc32( ( uint8_t* ) &nvmData->Crypto, sizeof( nvmData->Crypto ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->Crypto, sizeof( nvmData->Crypto ) -
                                                 sizeof( nvmData->Crypto.Crc32 ) );
     if( crc != nvmData->Crypto.Crc32 )
     {
@@ -1830,7 +1830,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // MacGroup1
-    crc = Crc32( ( uint8_t* ) &nvmData->MacGroup1, sizeof( nvmData->MacGroup1 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->MacGroup1, sizeof( nvmData->MacGroup1 ) -
                                                    sizeof( nvmData->MacGroup1.Crc32 ) );
     if( crc != nvmData->MacGroup1.Crc32 )
     {
@@ -1839,7 +1839,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // MacGroup2
-    crc = Crc32( ( uint8_t* ) &nvmData->MacGroup2, sizeof( nvmData->MacGroup2 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->MacGroup2, sizeof( nvmData->MacGroup2 ) -
                                                    sizeof( nvmData->MacGroup2.Crc32 ) );
     if( crc != nvmData->MacGroup2.Crc32 )
     {
@@ -1848,7 +1848,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // Secure Element
-    crc = Crc32( ( uint8_t* ) &nvmData->SecureElement, sizeof( nvmData->SecureElement ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->SecureElement, sizeof( nvmData->SecureElement ) -
                                                        sizeof( nvmData->SecureElement.Crc32 ) );
     if( crc != nvmData->SecureElement.Crc32 )
     {
@@ -1857,7 +1857,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // Region
-    crc = Crc32( ( uint8_t* ) &nvmData->RegionGroup1, sizeof( nvmData->RegionGroup1 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->RegionGroup1, sizeof( nvmData->RegionGroup1 ) -
                                                 sizeof( nvmData->RegionGroup1.Crc32 ) );
     if( crc != nvmData->RegionGroup1.Crc32 )
     {
@@ -1865,7 +1865,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
         notifyFlags |= LORAMAC_NVM_NOTIFY_FLAG_REGION_GROUP1;
     }
 
-    crc = Crc32( ( uint8_t* ) &nvmData->RegionGroup2, sizeof( nvmData->RegionGroup2 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->RegionGroup2, sizeof( nvmData->RegionGroup2 ) -
                                                 sizeof( nvmData->RegionGroup2.Crc32 ) );
     if( crc != nvmData->RegionGroup2.Crc32 )
     {
@@ -1874,7 +1874,7 @@ static void LoRaMacHandleNvm( LoRaMacNvmData_t* nvmData )
     }
 
     // ClassB
-    crc = Crc32( ( uint8_t* ) &nvmData->ClassB, sizeof( nvmData->ClassB ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvmData->ClassB, sizeof( nvmData->ClassB ) -
                                                 sizeof( nvmData->ClassB.Crc32 ) );
     if( crc != nvmData->ClassB.Crc32 )
     {
@@ -3571,7 +3571,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // Crypto
-    crc = Crc32( ( uint8_t* ) &nvm->Crypto, sizeof( nvm->Crypto ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->Crypto, sizeof( nvm->Crypto ) -
                                             sizeof( nvm->Crypto.Crc32 ) );
     if( crc == nvm->Crypto.Crc32 )
     {
@@ -3580,7 +3580,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // MacGroup1
-    crc = Crc32( ( uint8_t* ) &nvm->MacGroup1, sizeof( nvm->MacGroup1 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->MacGroup1, sizeof( nvm->MacGroup1 ) -
                                                sizeof( nvm->MacGroup1.Crc32 ) );
     if( crc == nvm->MacGroup1.Crc32 )
     {
@@ -3589,7 +3589,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // MacGroup2
-    crc = Crc32( ( uint8_t* ) &nvm->MacGroup2, sizeof( nvm->MacGroup2 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->MacGroup2, sizeof( nvm->MacGroup2 ) -
                                                sizeof( nvm->MacGroup2.Crc32 ) );
     if( crc == nvm->MacGroup2.Crc32 )
     {
@@ -3610,7 +3610,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // Secure Element
-    crc = Crc32( ( uint8_t* ) &nvm->SecureElement, sizeof( nvm->SecureElement ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->SecureElement, sizeof( nvm->SecureElement ) -
                                                    sizeof( nvm->SecureElement.Crc32 ) );
     if( crc == nvm->SecureElement.Crc32 )
     {
@@ -3619,7 +3619,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // RegionGroup1
-    crc = Crc32( ( uint8_t* ) &nvm->RegionGroup1, sizeof( nvm->RegionGroup1 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->RegionGroup1, sizeof( nvm->RegionGroup1 ) -
                                             sizeof( nvm->RegionGroup1.Crc32 ) );
     if( crc == nvm->RegionGroup1.Crc32 )
     {
@@ -3628,7 +3628,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
     }
 
     // RegionGroup2
-    crc = Crc32( ( uint8_t* ) &nvm->RegionGroup2, sizeof( nvm->RegionGroup2 ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->RegionGroup2, sizeof( nvm->RegionGroup2 ) -
                                             sizeof( nvm->RegionGroup2.Crc32 ) );
     if( crc == nvm->RegionGroup2.Crc32 )
     {
@@ -3636,7 +3636,7 @@ LoRaMacStatus_t RestoreNvmData( LoRaMacNvmData_t* nvm )
                  sizeof( Nvm.RegionGroup2 ) );
     }
 
-    crc = Crc32( ( uint8_t* ) &nvm->ClassB, sizeof( nvm->ClassB ) -
+    crc = LoRaCrc32( ( uint8_t* ) &nvm->ClassB, sizeof( nvm->ClassB ) -
                                             sizeof( nvm->ClassB.Crc32 ) );
     if( crc == nvm->ClassB.Crc32 )
     {

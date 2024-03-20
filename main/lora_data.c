@@ -210,7 +210,7 @@ int8_t LoRaDataResetToDefault(void) {
 
   int ret = LoRaDataSaveSettings(&default_settings);
   if (ret == 0) {
-    printf("INFO. Set LoRa data to default.");
+    printf("INFO. Set LoRa data to default.\n");
   }
   return ret;
 }

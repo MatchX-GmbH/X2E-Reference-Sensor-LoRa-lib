@@ -145,7 +145,7 @@ int8_t Nibble2HexChar( uint8_t a );
  *
  * \retval crc          The computed buffer of length CRC
  */
-uint32_t Crc32( uint8_t *buffer, uint16_t length );
+uint32_t LoRaCrc32( uint8_t *buffer, uint16_t length );
 
 /*!
  * \brief Computes the initial value of the CCITT 32 bits CRC. This function
@@ -153,7 +153,7 @@ uint32_t Crc32( uint8_t *buffer, uint16_t length );
  *
  * \retval crc          Initial crc value.
  */
-uint32_t Crc32Init( void );
+uint32_t LoRaCrc32Init( void );
 
 /*!
  * \brief Updates the value of the crc value.
@@ -164,7 +164,7 @@ uint32_t Crc32Init( void );
  *
  * \retval crc          Updated crc value.
  */
-uint32_t Crc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length );
+uint32_t LoRaCrc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length );
 
 /*!
  * \brief Finalizes the crc value after the calls to \ref Crc32Update.
@@ -173,7 +173,7 @@ uint32_t Crc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length );
  *
  * \retval crc          Updated crc value.
  */
-uint32_t Crc32Finalize( uint32_t crc );
+uint32_t LoRaCrc32Finalize( uint32_t crc );
 
 /*!
  * Begins critical section

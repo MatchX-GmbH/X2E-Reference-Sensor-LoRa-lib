@@ -84,7 +84,7 @@ int8_t Nibble2HexChar( uint8_t a )
     }
 }
 
-uint32_t Crc32( uint8_t *buffer, uint16_t length )
+uint32_t LoRaCrc32( uint8_t *buffer, uint16_t length )
 {
     // The CRC calculation follows CCITT - 0x04C11DB7
     const uint32_t reversedPolynom = 0xEDB88320;
@@ -106,12 +106,12 @@ uint32_t Crc32( uint8_t *buffer, uint16_t length )
     return ~crc;
 }
 
-uint32_t Crc32Init( void )
+uint32_t LoRaCrc32Init( void )
 {
     return 0xFFFFFFFF;
 }
 
-uint32_t Crc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length )
+uint32_t LoRaCrc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length )
 {
     // The CRC calculation follows CCITT - 0x04C11DB7
     const uint32_t reversedPolynom = 0xEDB88320;
@@ -132,7 +132,7 @@ uint32_t Crc32Update( uint32_t crcInit, uint8_t *buffer, uint16_t length )
     return crc;
 }
 
-uint32_t Crc32Finalize( uint32_t crc )
+uint32_t LoRaCrc32Finalize( uint32_t crc )
 {
     return ~crc;
 }
