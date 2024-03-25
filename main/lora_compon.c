@@ -1122,12 +1122,13 @@ void loraTask(void *param) {
         if (gLoRaLinkVar.unconfigmedCount >= LORAWAN_UNCONFIRMED_COUNT) {
           gLoRaLinkVar.unconfigmedCount = 0;
           gLoRaLinkVar.txConfirmed = true;
-        } else
-#endif
-        {
+        } else {
           gLoRaLinkVar.unconfigmedCount++;
           gLoRaLinkVar.txConfirmed = false;
         }
+#else
+        gLoRaLinkVar.txConfirmed = true;
+#endif
         gTickLoraLink = LoRaGetTick();
         gLoraLinkState = S_LORALINK_WAITING;
         break;
