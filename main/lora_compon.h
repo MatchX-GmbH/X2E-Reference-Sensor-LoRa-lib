@@ -64,6 +64,8 @@ bool LoRaComponIsIsm2400(void);
 int8_t LoRaComponGetSettings(LoRaSettings_t *aSettings);
 void LoRaComponResetSettings(void);
 
+bool LoRaComponIsClassC(void);
+
 //==========================================================================
 //==========================================================================
 #endif // INC_LORA_COMPON_H

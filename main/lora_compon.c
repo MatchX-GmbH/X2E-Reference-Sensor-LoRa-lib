@@ -123,6 +123,12 @@
 #define LORAWAN_UNCONFIRMED_COUNT 0
 #endif
 
+#if defined(CONFIG_LORAWAN_CLASS_C)
+#define LORAWAN_CLASS_C 1
+#else
+#define LORAWAN_CLASS_C 0
+#endif
+
 #if defined(CONFIG_LORAWAN_DEV_PROVISIONING)
 #define LORAWAN_DEV_PROVISIONING 1
 #else
@@ -522,6 +528,12 @@ static void McpsConfirm(McpsConfirm_t *mcpsConfirm) {
 //==========================================================================
 static void McpsIndication(McpsIndication_t *mcpsIndication) {
   if (mcpsIndication->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
+    if (LORAWAN_CLASS_C) {
+      if (mcpsIndication->Status == LORAMAC_EVENT_INFO_STATUS_DOWNLINK_REPEATED) {
+        // Skip showing Downlink repeated error at Class C.
+        return;
+      }
+    }
     printf("ERROR. McpsIndication() failed. %s\n", getMacEventStatusString(mcpsIndication->Status));
     return;
   }
@@ -699,6 +711,10 @@ static void InitOtaa(void) {
 
   mibReq.Type = MIB_APP_KEY;
   mibReq.Param.NwkKey = gLoRaSettings.appKey;
+  LoRaMacMibSetRequestConfirm(&mibReq);
+
+  mibReq.Type = MIB_DEVICE_CLASS;
+  mibReq.Param.Class = CLASS_A;
   LoRaMacMibSetRequestConfirm(&mibReq);
 
   LORACOMPON_PRINTLINE("InitOtaa()");
@@ -1000,10 +1016,10 @@ void loraTask(void *param) {
         } else {
           mlmeReq.Req.Join.Datarate = randr(LORAWAN_JOIN_DR_MIN, LORAWAN_JOIN_DR_MAX);
           if (!gLoRaLinkVar.usingIsm2400) {
-            #if defined (REGION_CN470)
-            // DR0 is unavailable for devices implementing CN470-510 
+#if defined(REGION_CN470)
+            // DR0 is unavailable for devices implementing CN470-510
             if (mlmeReq.Req.Join.Datarate == DR_0) mlmeReq.Req.Join.Datarate = DR_1;
-            #endif
+#endif
           }
         }
         mlmeReq.Req.Join.NetworkActivation = ACTIVATION_TYPE_OTAA;
@@ -1038,6 +1054,17 @@ void loraTask(void *param) {
         LORACOMPON_PRINTLINE("Joined");
         gLoraLinkState = S_LORALINK_WAITING;
         gTickLoraLink = LoRaGetTick();
+
+        if (LORAWAN_CLASS_C) {
+          MibRequestConfirm_t mibReq;
+          mibReq.Type = MIB_DEVICE_CLASS;
+          mibReq.Param.Class = CLASS_C;
+          if (LoRaMacMibSetRequestConfirm(&mibReq) == LORAMAC_STATUS_OK) {
+            LORACOMPON_PRINTLINE("Switch to Class C success.");
+          } else {
+            LORACOMPON_PRINTLINE("Switch to Class C failed.");
+          }
+        }
         break;
       }
 
@@ -1511,7 +1538,7 @@ void LoRaComponSetExtPower(void) { gLoRaLinkVar.batteryValue = BAT_LEVEL_EXT_SRC
 //==========================================================================
 // Check status
 //==========================================================================
-bool LoRaComponIsProvisioned(void) { 
+bool LoRaComponIsProvisioned(void) {
 #if LORAWAN_DEV_PROVISIONING
   return gLoRaSettings.provisionDone;
 #else
@@ -1549,4 +1576,15 @@ void LoRaComponResetSettings(void) {
   }
   LoRaDataResetToDefault();
   LoRaDataReadSettings(&gLoRaSettings);
+}
+
+//==========================================================================
+//==========================================================================
+bool LoRaComponIsClassC(void) {
+  if (LORAWAN_CLASS_C) {
+    return true;
+  }
+  else {
+    return false;
+  }
 }
