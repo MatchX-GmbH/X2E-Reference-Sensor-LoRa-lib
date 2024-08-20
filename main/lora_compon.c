@@ -268,6 +268,7 @@ static LoRaLinkVar_t gLoRaLinkVar;
 static LoRaSettings_t gLoRaSettings;
 
 static bool gWakeFromSleep;
+static bool gHoldProvisioning;
 
 // Preserved data when sleep
 #define VALUE_PRESERVED_DATA_CRC_IV 0x1234
@@ -950,13 +951,17 @@ void loraTask(void *param) {
         }
         break;
       }
+
       case S_LORALINK_PROVISIONING_START:
-        if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval)) {
-          gProvisionStatus = 0;
-          InitDevProvision();
-          ProvisioningHello();
-          gTickLoraLink = LoRaGetTick();
-          gLoraLinkState = S_LORALINK_PROVISIONING_HELLO;
+        if (!gHoldProvisioning) {
+          if ((gTickLoraLink == 0) || (LoRaTickElapsed(gTickLoraLink) >= gLoRaLinkVar.joinInterval)) {
+            LORACOMPON_PRINTLINE("Start provisioning.");
+            gProvisionStatus = 0;
+            InitDevProvision();
+            ProvisioningHello();
+            gTickLoraLink = LoRaGetTick();
+            gLoraLinkState = S_LORALINK_PROVISIONING_HELLO;
+          }
         }
         break;
 
@@ -1278,6 +1283,32 @@ int8_t LoRaComponStart(const char *aPid, const uint8_t *aPidHash, bool aWakeFrom
 
   //
   gWakeFromSleep = aWakeFromSleep;
+  gHoldProvisioning = false;
+
+  // Create task
+  if (xTaskCreate(loraTask, "LoRaTask", 4096, NULL, TASK_PRIO_GENERAL, &gLoRaTaskHandle) != pdPASS) {
+    printf("ERROR. Failed to create LoRa component task.\n");
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
+int8_t LoRaComponStart2(const char *aPid, const uint8_t *aPidHash, bool aWakeFromSleep, bool aHoldProvisioning) {
+  //
+  InitMutex();
+
+  //
+  LoRaDataInit();
+  LoRaDataReadSettings(&gLoRaSettings);
+
+  // PID
+  strncpy(gLoRaPreservedData.provisionId, aPid, sizeof(gLoRaPreservedData.provisionId));
+  memcpy(gLoRaPreservedData.provisionIdHash, aPidHash, sizeof(gLoRaPreservedData.provisionIdHash));
+
+  //
+  gWakeFromSleep = aWakeFromSleep;
+  gHoldProvisioning = aHoldProvisioning;
 
   // Create task
   if (xTaskCreate(loraTask, "LoRaTask", 4096, NULL, TASK_PRIO_GENERAL, &gLoRaTaskHandle) != pdPASS) {
@@ -1579,12 +1610,21 @@ void LoRaComponResetSettings(void) {
 }
 
 //==========================================================================
+// Is a Class C device?
 //==========================================================================
 bool LoRaComponIsClassC(void) {
   if (LORAWAN_CLASS_C) {
     return true;
-  }
-  else {
+  } else {
     return false;
+  }
+}
+
+//==========================================================================
+//==========================================================================
+void LoRaComponProceedProvisioning(void) {
+  if (TakeMutex()) {
+    gHoldProvisioning = false;
+    FreeMutex();
   }
 }

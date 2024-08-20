@@ -35,6 +35,7 @@ typedef struct {
 void LoRaComponHwInit(void);
 
 int8_t LoRaComponStart(const char *aPid, const uint8_t *aPidHash, bool aWakeFromSleep);
+int8_t LoRaComponStart2(const char *aPid, const uint8_t *aPidHash, bool aWakeFromSleep, bool aHoldProvisioning);
 void LoRaComponStop(void);
 const char *LoRaComponRegionName(void);
 //void LoRaComponNotify(uint32_t aEvent, void *aCallback);
@@ -65,6 +66,8 @@ int8_t LoRaComponGetSettings(LoRaSettings_t *aSettings);
 void LoRaComponResetSettings(void);
 
 bool LoRaComponIsClassC(void);
+
+void LoRaComponProceedProvisioning(void);
 
 //==========================================================================
 //==========================================================================
